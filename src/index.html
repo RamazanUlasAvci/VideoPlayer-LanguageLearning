@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self'; style-src 'self'; img-src 'self' data: blob: file:; media-src 'self' blob: file:; connect-src https://api.mymemory.translated.net; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>İzlerken Öğren Player</title>
+  <title>VideoPlayer - LanguageLearning</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -13,8 +13,8 @@
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">▶</div>
         <div>
-          <h1>İzlerken Öğren</h1>
-          <p>Videoyu izle, anlık çevir, kelimeyi kaydet.</p>
+          <h1>VideoPlayer - LanguageLearning</h1>
+          <p>Videoyu izle, anlık çevir, İngilizce kelime veya ifadeyi bağlamıyla kaydet.</p>
         </div>
       </div>
 
@@ -34,6 +34,15 @@
       <div class="file-status-group">
         <span class="status-label">Altyazı</span>
         <span id="subtitleFileName" class="status-value">Seçilmedi</span>
+      </div>
+
+      <div class="language-control">
+        <label for="targetLanguageSelect">Çeviri dili</label>
+        <select id="targetLanguageSelect" aria-label="Çeviri hedef dili"></select>
+      </div>
+
+      <div class="ai-control">
+        <button id="aiSettingsButton" type="button">AI Ayarları <span id="aiStatusBadge" class="ai-status-badge">AI Kapalı</span></button>
       </div>
 
       <div class="audio-control">
@@ -58,14 +67,13 @@
         <div class="empty-icon" aria-hidden="true">CC</div>
         <h2>Videoyu ve İngilizce SRT dosyasını buraya sürükle</h2>
         <p>Dosyaları tek tek veya ikisini birlikte bırakabilirsin. Düğmeler de çalışmaya devam eder.</p>
-        <p>O anki altyazıyı Türkçeye çevirmek için <kbd>T</kbd> tuşuna bas.</p>
+        <p id="translationHint">O anki altyazıyı seçtiğin dile çevirmek için <kbd>T</kbd> tuşuna bas.</p>
       </div>
 
       <div id="subtitleOverlay" class="subtitle-overlay" hidden>
         <div id="translatedSubtitle" class="translated-subtitle" hidden></div>
         <div id="sourceSubtitle" class="source-subtitle"></div>
       </div>
-
 
       <div id="dropOverlay" class="drop-overlay" hidden>
         <div class="drop-card">
@@ -75,6 +83,7 @@
           <small>Video ve altyazıyı aynı anda da bırakabilirsin.</small>
         </div>
       </div>
+
       <div id="busyOverlay" class="busy-overlay" hidden>
         <div class="spinner" aria-hidden="true"></div>
         <strong id="busyTitle">İşlem yapılıyor</strong>
@@ -87,10 +96,52 @@
       <div class="shortcut-help">
         <span><kbd>Space</kbd> Oynat / durdur</span>
         <span><kbd>T</kbd> Anlık çeviri</span>
-        <span>Çevirideki kelimeye tıkla → kütüphaneye kaydet</span>
+        <span>İngilizce kelimeye tıkla → AI uygun ifadeyi bağlamıyla kaydetsin</span>
       </div>
     </footer>
   </main>
+
+  <dialog id="languageDialog" class="language-dialog" aria-labelledby="languageDialogTitle">
+    <div class="language-dialog-content">
+      <div class="language-dialog-icon" aria-hidden="true">文</div>
+      <h2 id="languageDialogTitle">Hangi dile çevirmek istiyorsun?</h2>
+      <p>Bu tercih yalnızca ilk açılışta sorulur ve bilgisayarında kalıcı olarak saklanır. Daha sonra üst çubuktan değiştirebilirsin.</p>
+
+      <label for="initialLanguageSelect">Çeviri dili</label>
+      <select id="initialLanguageSelect">
+        <option value="">Bir dil seç</option>
+      </select>
+
+      <div id="customLanguageGroup" class="custom-language-group" hidden>
+        <label for="customLanguageInput">Dil kodu</label>
+        <input id="customLanguageInput" type="text" inputmode="latin" maxlength="35" placeholder="Örn. de, ja, pt-BR">
+        <small>Çeviri servisinin desteklediği BCP-47 dil kodunu gir.</small>
+      </div>
+
+      <button id="saveInitialLanguageButton" class="primary-button" type="button" disabled>Tercihi Kaydet</button>
+      <p id="languageDialogError" class="dialog-error" role="alert" hidden></p>
+    </div>
+  </dialog>
+
+
+  <dialog id="aiDialog" class="language-dialog ai-dialog" aria-labelledby="aiDialogTitle">
+    <div class="language-dialog-content">
+      <div class="language-dialog-icon" aria-hidden="true">AI</div>
+      <h2 id="aiDialogTitle">Gemini ifade analizi</h2>
+      <p>Gemini, İngilizce altyazıdaki kelimelerin tek başına mı yoksa bir phrasal verb, idiom veya sabit ifade içinde mi öğrenilmesi gerektiğini belirler. Çeviri MyMemory üzerinden çalışmaya devam eder.</p>
+
+      <label for="geminiApiKeyInput">Gemini API anahtarı</label>
+      <input id="geminiApiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="API anahtarını buraya yapıştır">
+      <small>Anahtar kaynak koduna veya GitHub'a yazılmaz; işletim sisteminin güvenli deposunda şifrelenerek saklanır.</small>
+
+      <div class="dialog-button-row">
+        <button id="saveAiKeyButton" class="primary-button" type="button">Anahtarı Kaydet</button>
+        <button id="clearAiKeyButton" type="button">Kaydedilmiş Anahtarı Sil</button>
+        <button id="closeAiDialogButton" type="button">Kapat</button>
+      </div>
+      <p id="aiDialogStatus" class="dialog-status" role="status"></p>
+    </div>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

@@ -2,6 +2,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { normalizeLanguageCode } = require('./settings-store');
 
 class LearningLibraryStore {
   constructor(filePath) {
@@ -15,7 +16,7 @@ class LearningLibraryStore {
     try {
       await fs.access(this.filePath);
     } catch {
-      await this.writeData({ version: 1, items: [] });
+      await this.writeData({ version: 2, items: [] });
     }
   }
 
@@ -30,17 +31,20 @@ class LearningLibraryStore {
         throw new Error('Kütüphane dosyası beklenen biçimde değil.');
       }
 
-      return parsed;
-    } catch (error) {
+      return {
+        version: Math.max(2, Number(parsed.version) || 1),
+        items: parsed.items
+      };
+    } catch {
       const backupPath = `${this.filePath}.bozuk-${Date.now()}`;
 
       try {
         await fs.rename(this.filePath, backupPath);
       } catch {
-        // Bozuk dosya taşınamasa bile temiz bir kütüphane oluşturmayı dene.
+        // Create a clean library even if the damaged file cannot be moved.
       }
 
-      const empty = { version: 1, items: [] };
+      const empty = { version: 2, items: [] };
       await this.writeData(empty);
       return empty;
     }
@@ -59,89 +63,138 @@ class LearningLibraryStore {
     }
   }
 
-  normalizeWord(value) {
+  normalizeTerm(value) {
     return String(value)
       .normalize('NFKC')
-      .toLocaleLowerCase('tr-TR')
+      .toLocaleLowerCase('en')
       .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
-  async saveWord(input) {
-    const clickedWord = String(input.clickedWord || '').trim();
-    const normalizedWord = this.normalizeWord(clickedWord);
+  async saveLearningUnit(input) {
+    const sourceLanguage = normalizeLanguageCode(input.sourceLanguage || 'en');
+    const targetLanguage = normalizeLanguageCode(input.targetLanguage);
+    const term = String(input.term || input.clickedWord || '').trim();
+    const normalizedTerm = this.normalizeTerm(input.normalizedTerm || input.lemma || term);
 
-    if (!normalizedWord) {
-      throw new Error('Kaydedilecek geçerli bir kelime bulunamadı.');
+    if (!normalizedTerm) {
+      throw new Error('Kaydedilecek geçerli bir İngilizce kelime veya ifade bulunamadı.');
     }
 
+    const lemma = String(input.lemma || normalizedTerm).trim();
+    const unitType = String(input.unitType || 'word').trim();
     const sourceSentence = String(input.sourceSentence || '').trim();
     const translatedSentence = String(input.translatedSentence || '').trim();
     const videoName = String(input.videoName || '').trim();
     const subtitleStartMs = Number.isFinite(input.subtitleStartMs)
       ? Math.max(0, Math.round(input.subtitleStartMs))
       : null;
+    const subtitleEndMs = Number.isFinite(input.subtitleEndMs)
+      ? Math.max(0, Math.round(input.subtitleEndMs))
+      : null;
+    const confidence = Number.isFinite(input.confidence)
+      ? Math.max(0, Math.min(1, Number(input.confidence)))
+      : null;
+    const analysisProvider = String(input.analysisProvider || '').trim() || null;
+    const analysisModel = String(input.analysisModel || '').trim() || null;
 
     this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
       const data = await this.readData();
+      data.version = 2;
       const now = new Date().toISOString();
-      const existing = data.items.find(
-        (item) => item.normalizedWord === normalizedWord && item.targetLanguage === 'tr'
-      );
+      const existing = data.items.find((item) => {
+        const savedNormalized = item.normalizedTerm || item.normalizedWord;
+        return savedNormalized === normalizedTerm &&
+          (item.sourceLanguage || 'en') === sourceLanguage;
+      });
 
       const context = {
         sourceSentence,
         translatedSentence,
+        targetLanguage,
         videoName,
         subtitleStartMs,
+        subtitleEndMs,
         savedAt: now
       };
 
       if (existing) {
+        existing.term = existing.term || existing.clickedWord || term;
+        existing.normalizedTerm = normalizedTerm;
+        existing.lemma = existing.lemma || lemma;
+        existing.unitType = existing.unitType || unitType;
+        existing.sourceLanguage = sourceLanguage;
         existing.timesSaved = Number(existing.timesSaved || 1) + 1;
         existing.lastSavedAt = now;
-        existing.clickedForms = Array.from(
-          new Set([...(existing.clickedForms || []), clickedWord])
-        );
+        existing.surfaceForms = Array.from(new Set([
+          ...(existing.surfaceForms || existing.clickedForms || []),
+          term
+        ]));
+        existing.analysis = existing.analysis || {
+          provider: analysisProvider,
+          model: analysisModel,
+          confidence
+        };
         existing.contexts = Array.isArray(existing.contexts) ? existing.contexts : [];
 
-        const contextAlreadyExists = existing.contexts.some(
-          (savedContext) =>
-            savedContext.sourceSentence === sourceSentence &&
-            savedContext.translatedSentence === translatedSentence &&
-            savedContext.videoName === videoName &&
-            savedContext.subtitleStartMs === subtitleStartMs
+        const contextAlreadyExists = existing.contexts.some((savedContext) =>
+          savedContext.sourceSentence === sourceSentence &&
+          savedContext.translatedSentence === translatedSentence &&
+          savedContext.targetLanguage === targetLanguage &&
+          savedContext.videoName === videoName &&
+          savedContext.subtitleStartMs === subtitleStartMs
         );
 
-        if (!contextAlreadyExists) {
-          existing.contexts.push(context);
-        }
+        if (!contextAlreadyExists) existing.contexts.push(context);
       } else {
         data.items.push({
           id: globalThis.crypto.randomUUID(),
-          clickedWord,
-          clickedForms: [clickedWord],
-          normalizedWord,
-          sourceLanguage: 'en',
-          targetLanguage: 'tr',
+          term,
+          normalizedTerm,
+          lemma,
+          unitType,
+          sourceLanguage,
+          surfaceForms: [term],
           firstSavedAt: now,
           lastSavedAt: now,
           timesSaved: 1,
+          analysis: {
+            provider: analysisProvider,
+            model: analysisModel,
+            confidence
+          },
           contexts: [context]
         });
       }
 
-      data.items.sort((a, b) => a.normalizedWord.localeCompare(b.normalizedWord, 'tr'));
+      data.items.sort((a, b) =>
+        String(a.normalizedTerm || a.normalizedWord || '').localeCompare(
+          String(b.normalizedTerm || b.normalizedWord || ''),
+          'en'
+        )
+      );
+
       await this.writeData(data);
 
       return {
         totalWords: data.items.length,
-        savedWord: clickedWord,
+        savedTerm: term,
+        unitType,
         wasExisting: Boolean(existing)
       };
     });
 
     return this.writeQueue;
+  }
+
+  // Backward-compatible method for old callers and existing tests.
+  async saveWord(input) {
+    return this.saveLearningUnit({
+      ...input,
+      term: input.term || input.clickedWord,
+      unitType: input.unitType || 'word'
+    });
   }
 
   async getSummary() {

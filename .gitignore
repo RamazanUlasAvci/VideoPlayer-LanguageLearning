@@ -5,13 +5,12 @@ out/
 
 .env
 .env.*
-
-learning-library.json
-translation-cache.json
-converted-videos/
-*.compatible.mp4
+!.env.example
 
 *.log
 npm-debug.log*
-Thumbs.db
+
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/

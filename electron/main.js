@@ -6,7 +6,8 @@ const {
   dialog,
   ipcMain,
   session,
-  shell
+  shell,
+  safeStorage
 } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
@@ -16,10 +17,16 @@ const { pathToFileURL } = require('node:url');
 const ffmpegStaticPath = require('ffmpeg-static');
 const { LearningLibraryStore } = require('./library-store');
 const { TranslationService } = require('./translation-service');
+const { SettingsStore } = require('./settings-store');
+const { GeminiCredentialStore } = require('./credential-store');
+const { LearningUnitAnalysisService } = require('./ai-learning-service');
 
 let mainWindow = null;
 let libraryStore = null;
 let translationService = null;
+let settingsStore = null;
+let credentialStore = null;
+let learningUnitAnalysisService = null;
 const allowedVideoPaths = new Set();
 const runningConversions = new Map();
 const supportedVideoExtensions = new Set(['.mp4', '.mkv', '.mov', '.webm', '.m4v']);
@@ -107,7 +114,7 @@ function createWindow() {
     height: 820,
     minWidth: 900,
     minHeight: 620,
-    title: 'İzlerken Öğren Player',
+    title: 'VideoPlayer - LanguageLearning',
     backgroundColor: '#0b0e14',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -152,7 +159,21 @@ async function ensureStores() {
   translationService = new TranslationService(
     path.join(userDataDirectory, 'translation-cache.json')
   );
-  await libraryStore.ensureFile();
+  settingsStore = new SettingsStore(
+    path.join(userDataDirectory, 'preferences.json')
+  );
+  credentialStore = new GeminiCredentialStore(
+    path.join(userDataDirectory, 'gemini-api-key.bin'),
+    safeStorage
+  );
+  learningUnitAnalysisService = new LearningUnitAnalysisService(
+    path.join(userDataDirectory, 'learning-unit-analysis-cache.json'),
+    credentialStore
+  );
+  await Promise.all([
+    libraryStore.ensureFile(),
+    settingsStore.ensureFile()
+  ]);
 }
 
 function registerIpcHandlers() {
@@ -201,12 +222,74 @@ function registerIpcHandlers() {
     throw new Error('Bu dosya desteklenmiyor. Video veya .srt dosyası bırak.');
   });
 
+  ipcMain.handle('preferences:get', async () => {
+    return settingsStore.getPreferences();
+  });
+
+  ipcMain.handle('preferences:set-target-language', async (_event, payload) => {
+    return settingsStore.setTargetLanguage(payload?.targetLanguage);
+  });
+
   ipcMain.handle('translation:translate', async (_event, payload) => {
-    return translationService.translate(payload?.text);
+    const preferences = await settingsStore.getPreferences();
+
+    if (!preferences.targetLanguage) {
+      throw new Error('Önce bir çeviri dili seçmelisin.');
+    }
+
+    return translationService.translate(payload?.text, {
+      sourceLanguage: 'en',
+      targetLanguage: preferences.targetLanguage
+    });
+  });
+
+  ipcMain.handle('ai:status', async () => credentialStore.getStatus());
+
+  ipcMain.handle('ai:save-key', async (_event, payload) => {
+    const status = await credentialStore.saveApiKey(payload?.apiKey);
+    learningUnitAnalysisService.clearRuntimeClients();
+    return status;
+  });
+
+  ipcMain.handle('ai:clear-key', async () => {
+    const status = await credentialStore.clearApiKey();
+    learningUnitAnalysisService.clearRuntimeClients();
+    return status;
+  });
+
+  ipcMain.handle('learning:analyze-units', async (_event, payload) => {
+    return learningUnitAnalysisService.analyze({
+      sentence: payload?.sentence,
+      tokens: payload?.tokens
+    });
+  });
+
+  ipcMain.handle('library:save-unit', async (_event, payload) => {
+    const preferences = await settingsStore.getPreferences();
+
+    if (!preferences.targetLanguage) {
+      throw new Error('Önce bir çeviri dili seçmelisin.');
+    }
+
+    return libraryStore.saveLearningUnit({
+      ...(payload || {}),
+      sourceLanguage: 'en',
+      targetLanguage: preferences.targetLanguage
+    });
   });
 
   ipcMain.handle('library:save-word', async (_event, payload) => {
-    return libraryStore.saveWord(payload || {});
+    const preferences = await settingsStore.getPreferences();
+
+    if (!preferences.targetLanguage) {
+      throw new Error('Önce bir çeviri dili seçmelisin.');
+    }
+
+    return libraryStore.saveWord({
+      ...(payload || {}),
+      sourceLanguage: 'en',
+      targetLanguage: preferences.targetLanguage
+    });
   });
 
   ipcMain.handle('library:summary', async () => {
@@ -245,7 +328,7 @@ async function convertToCompatibleMp4(inputPath, sender) {
     .update(`${inputPath}|${stats.size}|${stats.mtimeMs}`)
     .digest('hex')
     .slice(0, 18);
-  const outputDirectory = path.join(app.getPath('temp'), 'izlerken-ogren-player');
+  const outputDirectory = path.join(app.getPath('temp'), 'video-player-language-learning');
   const outputPath = path.join(outputDirectory, `${hash}-uyumlu.mp4`);
 
   await fs.mkdir(outputDirectory, { recursive: true });

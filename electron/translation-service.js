@@ -2,6 +2,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { normalizeLanguageCode } = require('./settings-store');
 
 class TranslationService {
   constructor(cacheFilePath) {
@@ -22,12 +23,12 @@ class TranslationService {
         if (typeof value === 'string') this.cache.set(key, value);
       }
     } catch {
-      // İlk çalıştırmada cache dosyasının bulunmaması normaldir.
+      // It is normal for the cache file not to exist on first launch.
     }
   }
 
-  cacheKey(text) {
-    return `en|tr|${text.trim()}`;
+  cacheKey(text, sourceLanguage = 'en', targetLanguage) {
+    return `${normalizeLanguageCode(sourceLanguage)}|${normalizeLanguageCode(targetLanguage)}|${text.trim()}`;
   }
 
   decodeEntities(value) {
@@ -56,8 +57,10 @@ class TranslationService {
     }
   }
 
-  async translate(text) {
+  async translate(text, { sourceLanguage = 'en', targetLanguage } = {}) {
     const cleanText = String(text || '').replace(/\s+/g, ' ').trim();
+    const normalizedSource = normalizeLanguageCode(sourceLanguage);
+    const normalizedTarget = normalizeLanguageCode(targetLanguage);
 
     if (!cleanText) {
       throw new Error('Çevrilecek altyazı metni boş.');
@@ -67,17 +70,33 @@ class TranslationService {
       throw new Error('Altyazı ücretsiz çeviri servisi için fazla uzun.');
     }
 
+    if (normalizedSource === normalizedTarget) {
+      return {
+        translatedText: cleanText,
+        provider: 'same-language',
+        cached: true,
+        sourceLanguage: normalizedSource,
+        targetLanguage: normalizedTarget
+      };
+    }
+
     await this.loadCache();
-    const key = this.cacheKey(cleanText);
+    const key = this.cacheKey(cleanText, normalizedSource, normalizedTarget);
     const cached = this.cache.get(key);
 
     if (cached) {
-      return { translatedText: cached, provider: 'local-cache', cached: true };
+      return {
+        translatedText: cached,
+        provider: 'local-cache',
+        cached: true,
+        sourceLanguage: normalizedSource,
+        targetLanguage: normalizedTarget
+      };
     }
 
     const endpoint = new URL('https://api.mymemory.translated.net/get');
     endpoint.searchParams.set('q', cleanText);
-    endpoint.searchParams.set('langpair', 'en|tr');
+    endpoint.searchParams.set('langpair', `${normalizedSource}|${normalizedTarget}`);
 
     let response;
     try {
@@ -85,7 +104,7 @@ class TranslationService {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'Izlerken-Ogren-Player/0.1.0'
+          'User-Agent': 'VideoPlayer-LanguageLearning/0.2.0'
         },
         signal: AbortSignal.timeout(15000)
       });
@@ -109,7 +128,13 @@ class TranslationService {
     this.writeQueue = this.writeQueue.catch(() => undefined).then(() => this.persistCache());
     await this.writeQueue;
 
-    return { translatedText, provider: 'MyMemory', cached: false };
+    return {
+      translatedText,
+      provider: 'MyMemory',
+      cached: false,
+      sourceLanguage: normalizedSource,
+      targetLanguage: normalizedTarget
+    };
   }
 }
 
