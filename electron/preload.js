@@ -27,5 +27,10 @@ contextBridge.exposeInMainWorld('desktopAPI', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('video:conversion-progress', listener);
     return () => ipcRenderer.removeListener('video:conversion-progress', listener);
+  },
+  onLibraryClipStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('library:clip-status', listener);
+    return () => ipcRenderer.removeListener('library:clip-status', listener);
   }
 });

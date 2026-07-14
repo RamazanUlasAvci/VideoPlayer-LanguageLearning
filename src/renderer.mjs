@@ -462,6 +462,7 @@ async function saveLearningUnit(unit, cue, translatedText, analysis) {
     sourceSentence: cue.text,
     translatedSentence: translatedText,
     videoName: state.selectedVideo?.fileName || '',
+    videoPath: state.selectedVideo?.filePath || '',
     subtitleStartMs: cue.startMs,
     subtitleEndMs: cue.endMs,
     confidence: unit.confidence,
@@ -473,10 +474,20 @@ async function saveLearningUnit(unit, cue, translatedText, analysis) {
 
   elements.libraryCount.textContent = String(result.totalWords);
   setUnitSaved(unit.id);
+
+  if (result.clipStatus === 'ready') {
+    showToast(
+      result.wasExisting
+        ? `“${unit.term}” yeniden kaydedildi; sahne klibi hazır.`
+        : `“${unit.term}” sahne klibiyle kütüphaneye eklendi.`
+    );
+    return;
+  }
+
   showToast(
     result.wasExisting
-      ? `“${unit.term}” yeniden kaydedildi; bağlam eklendi.`
-      : `“${unit.term}” öğrenme kütüphanesine eklendi.`
+      ? `“${unit.term}” yeniden kaydedildi; sahne klibi hazırlanıyor…`
+      : `“${unit.term}” kaydedildi; sahne klibi hazırlanıyor…`
   );
 }
 
@@ -1007,6 +1018,21 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => refreshAudioOut
 desktopAPI.onConversionProgress((payload) => {
   if (!state.conversionInProgress) return;
   elements.busyMessage.textContent = payload.message || 'Video dönüştürülüyor...';
+});
+
+desktopAPI.onLibraryClipStatus((payload) => {
+  if (payload.status === 'ready') {
+    showToast(payload.message || 'Sahne klibi hazır.');
+    return;
+  }
+
+  if (payload.status === 'failed') {
+    setStatus(
+      `${payload.message || 'Sahne klibi hazırlanamadı.'} Kelime ve cümle bağlamı kütüphanede korunuyor.`,
+      { error: true }
+    );
+    showToast(payload.message || 'Sahne klibi hazırlanamadı.');
+  }
 });
 
 appendLanguageOptions(elements.targetLanguageSelect);

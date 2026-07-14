@@ -20,6 +20,7 @@ const { TranslationService } = require('./translation-service');
 const { SettingsStore } = require('./settings-store');
 const { GeminiCredentialStore } = require('./credential-store');
 const { LearningUnitAnalysisService } = require('./ai-learning-service');
+const { LibraryClipService } = require('./library-clip-service');
 
 let mainWindow = null;
 let libraryStore = null;
@@ -27,6 +28,7 @@ let translationService = null;
 let settingsStore = null;
 let credentialStore = null;
 let learningUnitAnalysisService = null;
+let libraryClipService = null;
 const allowedVideoPaths = new Set();
 const runningConversions = new Map();
 const supportedVideoExtensions = new Set(['.mp4', '.mkv', '.mov', '.webm', '.m4v']);
@@ -170,10 +172,17 @@ async function ensureStores() {
     path.join(userDataDirectory, 'learning-unit-analysis-cache.json'),
     credentialStore
   );
+  libraryClipService = new LibraryClipService({
+    mediaDirectory: path.join(userDataDirectory, 'library-media'),
+    libraryStore,
+    getFfmpegPath: getUsableFfmpegPath
+  });
   await Promise.all([
     libraryStore.ensureFile(),
-    settingsStore.ensureFile()
+    settingsStore.ensureFile(),
+    libraryClipService.ensureDirectory()
   ]);
+  await libraryStore.markInterruptedClipJobs();
 }
 
 function registerIpcHandlers() {
@@ -264,18 +273,45 @@ function registerIpcHandlers() {
     });
   });
 
-  ipcMain.handle('library:save-unit', async (_event, payload) => {
+  ipcMain.handle('library:save-unit', async (event, payload) => {
     const preferences = await settingsStore.getPreferences();
 
     if (!preferences.targetLanguage) {
       throw new Error('Önce bir çeviri dili seçmelisin.');
     }
 
-    return libraryStore.saveLearningUnit({
+    const videoPath = path.resolve(String(payload?.videoPath || ''));
+    if (!allowedVideoPaths.has(videoPath)) {
+      throw new Error('Klip oluşturulacak video uygulama tarafından seçilmedi.');
+    }
+
+    const descriptor = await libraryClipService.createDescriptor({
+      videoPath,
+      subtitleStartMs: payload?.subtitleStartMs,
+      subtitleEndMs: payload?.subtitleEndMs
+    });
+
+    const saveResult = await libraryStore.saveLearningUnit({
       ...(payload || {}),
       sourceLanguage: 'en',
-      targetLanguage: preferences.targetLanguage
+      targetLanguage: preferences.targetLanguage,
+      clipId: descriptor.clipId,
+      clipPath: descriptor.relativePath,
+      clipStatus: 'processing',
+      clipStartMs: descriptor.clipStartMs,
+      clipEndMs: descriptor.clipEndMs
     });
+
+    const clipResult = await libraryClipService.queueClip(descriptor, {
+      sender: event.sender,
+      term: saveResult.savedTerm
+    });
+
+    return {
+      ...saveResult,
+      clipStatus: clipResult.status,
+      clipPath: clipResult.clipPath
+    };
   });
 
   ipcMain.handle('library:save-word', async (_event, payload) => {

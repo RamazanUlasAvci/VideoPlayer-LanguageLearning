@@ -44,7 +44,7 @@ test('learning library stores an English unit with full sentence context', async
   assert.equal(second.wasExisting, true);
 
   const data = JSON.parse(await fs.readFile(filePath, 'utf8'));
-  assert.equal(data.version, 2);
+  assert.equal(data.version, 3);
   assert.equal(data.items[0].term, 'give up');
   assert.equal(data.items[0].unitType, 'phrasal_verb');
   assert.deepEqual(data.items[0].surfaceForms.sort(), ['gave up', 'give up']);

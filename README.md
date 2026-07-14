@@ -17,6 +17,8 @@ The app plays local video files, synchronizes external `.srt` subtitles, transla
 - Use Gemini to identify English phrasal verbs, idioms, fixed expressions, collocations, compound terms, and proper names
 - Click any word in the **English subtitle**; the app automatically saves either that single word or the complete expression it belongs to
 - Always save the complete English sentence and its translation as context
+- Automatically cut an independent, audible MP4 scene clip for every saved subtitle context
+- Reuse one scene clip when several learning units are saved from the same subtitle
 - Store the learning library permanently as JSON
 - Cache sentence translations and successful Gemini analyses locally
 - Select an audio output device such as headphones, speakers, or a DAC
@@ -56,11 +58,20 @@ Every item is stored with:
 - Translation language used for that context
 - Video file name
 - Subtitle start and end times
+- A local scene-clip reference and clip generation status
 - AI provider, model, and confidence when available
 - First and most recent save dates
 - Number of saves and all unique contexts
 
 The translation itself is not clickable. It is shown only as meaning support; learning items always come from the English subtitle.
+
+## Automatic scene clips
+
+When an English word or expression is saved, the app also creates a standalone MP4 clip from that subtitle's time range. It adds 400 ms before and after the subtitle so that speech is less likely to be cut off.
+
+Clip generation runs in the Electron main process with the bundled FFmpeg binary. The learning item is saved immediately, while the clip is prepared in the background. If clip generation fails, the English term, sentence, translation, and timestamps remain safely stored in the library. Saving the item again retries the clip.
+
+Several words or expressions saved from the same video and subtitle range share the same clip file instead of creating duplicates. The resulting clip is independent of the original video, so it remains usable even if the source video is later moved or deleted.
 
 ## Gemini AI setup
 
@@ -104,6 +115,7 @@ The directory can contain:
 - `translation-cache.json`
 - `learning-unit-analysis-cache.json`
 - `learning-library.json`
+- `library-media/` — independent MP4 scene clips linked to learning contexts
 - `gemini-api-key.bin` — encrypted by the operating system
 
 The **Library** button reveals the learning-library file in the file manager.
@@ -136,8 +148,9 @@ On Windows, `KURULUM-VE-BASLAT.bat` can also be used.
 5. Open or drag in an English `.srt` subtitle file.
 6. Pause on a subtitle and press `T`.
 7. Click a word in the English subtitle.
-8. The correct word or expression is saved automatically with sentence context.
-9. Press `T` again to hide the translation and learning controls.
+8. The correct word or expression is saved immediately with sentence context.
+9. A short audible scene clip is prepared in the background and linked to that context.
+10. Press `T` again to hide the translation and learning controls.
 
 ## Audio output
 
@@ -180,6 +193,7 @@ The automated tests cover:
 - Local expression fallback behavior
 - Validation of non-overlapping AI spans
 - Persistent English word/expression storage with multilingual sentence contexts
+- Stable scene-clip IDs, subtitle padding, and shared clip status updates
 
 ## Security design
 
@@ -197,8 +211,8 @@ The automated tests cover:
 
 - Videos stay on the user's computer
 - Subtitle files stay on the user's computer
-- FFmpeg conversion is fully local
-- The learning library stays on the user's computer
+- FFmpeg conversion and scene clipping are fully local
+- The learning library and generated scene clips stay on the user's computer
 - Only the active subtitle sentence is sent to the translation provider
 - Only the active English sentence and its word tokens are sent to Gemini for phrase analysis
 - Gemini Interactions requests are made with `store: false`
