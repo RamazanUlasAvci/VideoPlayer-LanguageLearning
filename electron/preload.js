@@ -1,0 +1,22 @@
+'use strict';
+
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+contextBridge.exposeInMainWorld('desktopAPI', {
+  openVideo: () => ipcRenderer.invoke('video:open'),
+  openSubtitle: () => ipcRenderer.invoke('subtitle:open'),
+  openDroppedFile: (file) => {
+    const filePath = webUtils.getPathForFile(file);
+    return ipcRenderer.invoke('file:open-dropped', { filePath });
+  },
+  convertVideo: (filePath) => ipcRenderer.invoke('video:convert', { filePath }),
+  translateSubtitle: (text) => ipcRenderer.invoke('translation:translate', { text }),
+  saveLearningWord: (item) => ipcRenderer.invoke('library:save-word', item),
+  getLibrarySummary: () => ipcRenderer.invoke('library:summary'),
+  revealLibraryFile: () => ipcRenderer.invoke('library:reveal'),
+  onConversionProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('video:conversion-progress', listener);
+    return () => ipcRenderer.removeListener('video:conversion-progress', listener);
+  }
+});
