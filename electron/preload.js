@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   saveLearningUnit: (item) => ipcRenderer.invoke('library:save-unit', item),
   saveLearningWord: (item) => ipcRenderer.invoke('library:save-word', item),
   getLibrarySummary: () => ipcRenderer.invoke('library:summary'),
+  getLibraryItems: () => ipcRenderer.invoke('library:list'),
+  deleteLibraryItem: (itemId) => ipcRenderer.invoke('library:delete-item', { itemId }),
   revealLibraryFile: () => ipcRenderer.invoke('library:reveal'),
   onConversionProgress: (callback) => {
     const listener = (_event, payload) => callback(payload);

@@ -670,3 +670,439 @@ kbd {
   color: var(--muted);
   line-height: 1.4;
 }
+
+/* Learning library */
+.library-dialog {
+  width: min(1440px, calc(100vw - 24px));
+  height: calc(100vh - 24px);
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #0d131d;
+  color: var(--text);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.72);
+}
+
+.library-dialog::backdrop {
+  background: rgba(3, 6, 11, 0.88);
+  backdrop-filter: blur(5px);
+}
+
+.library-dialog-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.library-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--border);
+  background: #101722;
+}
+
+.library-dialog-header h2 {
+  margin: 4px 0 5px;
+  font-size: 24px;
+}
+
+.library-dialog-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.library-eyebrow {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.library-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(190px, 280px);
+  gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.library-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.library-toolbar label > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.library-toolbar input,
+.library-toolbar select {
+  width: 100%;
+  max-width: none;
+  min-height: 40px;
+  padding: 0 11px;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-height: min-content;
+  padding: 18px 24px 28px;
+  overflow: visible;
+}
+
+.library-message {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  min-height: 260px;
+  padding: 32px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.library-message[hidden] {
+  display: none;
+}
+
+.library-message strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+/* Library cards use an explicit expanded class instead of relying on the
+   HTML hidden attribute. This keeps the accordion reliable in Electron and
+   makes the control visually clear. */
+.library-card {
+  flex: 0 0 auto;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #121a26;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.library-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 66px;
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid rgba(42, 53, 71, 0.78);
+}
+
+.library-card.collapsed .library-card-header {
+  border-bottom-color: transparent;
+}
+
+.library-term-block {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 0;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: none;
+}
+
+.library-term-block:focus-visible {
+  box-shadow: 0 0 0 3px rgba(104, 225, 203, 0.22);
+}
+
+.library-term-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.library-term {
+  margin: 0;
+  color: #f7f9fc;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.library-unit-badge,
+.library-clip-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid #455269;
+  border-radius: 999px;
+  color: #c9d2df;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.library-unit-badge.phrasal_verb,
+.library-unit-badge.idiom,
+.library-unit-badge.fixed_expression {
+  border-color: rgba(255, 209, 102, 0.55);
+  background: rgba(255, 209, 102, 0.08);
+  color: var(--translation);
+}
+
+.library-term-meta {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Keep the all-languages list compact. Metadata becomes visible together
+   with the details, while a selected language still opens cards by default. */
+.library-card.collapsed .library-term-meta {
+  display: none;
+}
+
+.library-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-expand-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 104px;
+  height: 40px;
+  padding: 0 12px;
+  border-color: #3a475c;
+  border-radius: 10px;
+  background: #182231;
+  color: #d6deea;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.library-expand-button:hover {
+  border-color: var(--accent);
+  background: rgba(104, 225, 203, 0.08);
+}
+
+.library-expand-label {
+  line-height: 1;
+}
+
+/* Draw the chevron with CSS instead of a font glyph. The previous glyph
+   rendered blank on some Windows font configurations. */
+.library-expand-icon {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transform-origin: center;
+  transition: transform 150ms ease;
+}
+
+.library-expand-button[aria-expanded="true"] .library-expand-icon {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+
+.library-delete-button {
+  flex: 0 0 auto;
+  border-color: rgba(255, 140, 140, 0.38);
+  color: #ffc0c0;
+}
+
+.library-delete-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(255, 140, 140, 0.12);
+}
+
+.library-contexts {
+  display: none;
+  width: 100%;
+  border-top: 1px solid rgba(42, 53, 71, 0.78);
+}
+
+/* JavaScript also sets an inline display value as a defensive fallback.
+   The class keeps the intended state visible in the DOM and CSS. */
+.library-contexts.is-visible,
+.library-card.is-expanded .library-contexts {
+  display: block;
+}
+
+.library-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 18px;
+  padding: 17px 18px;
+}
+
+.library-context + .library-context {
+  border-top: 1px solid rgba(42, 53, 71, 0.7);
+}
+
+.library-context-text {
+  min-width: 0;
+}
+
+.library-source-sentence {
+  margin: 0;
+  color: #f0f4fa;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.48;
+}
+
+.library-translated-sentence {
+  margin: 9px 0 0;
+  color: var(--translation);
+  font-size: 15px;
+  line-height: 1.48;
+}
+
+.library-context-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.library-context-meta span {
+  overflow-wrap: anywhere;
+}
+
+.library-clip-panel {
+  display: grid;
+  align-content: center;
+  min-height: 128px;
+  overflow: hidden;
+  border: 1px solid #2f3c50;
+  border-radius: 11px;
+  background: #080c12;
+}
+
+.library-clip-video {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  background: #000;
+}
+
+.library-clip-status {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 24px 18px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.library-clip-status strong {
+  color: var(--text);
+}
+
+.library-clip-status.processing .library-clip-badge {
+  border-color: rgba(100, 169, 255, 0.55);
+  color: #a9d0ff;
+}
+
+.library-clip-status.failed .library-clip-badge {
+  border-color: rgba(255, 140, 140, 0.55);
+  color: #ffb1b1;
+}
+
+.library-clip-error {
+  max-width: 420px;
+  color: #d89c9c;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 850px) {
+  .library-dialog {
+    width: calc(100vw - 12px);
+    height: calc(100vh - 12px);
+    max-height: calc(100vh - 12px);
+  }
+
+  .library-dialog-header,
+  .library-context {
+    grid-template-columns: 1fr;
+  }
+
+  .library-dialog-header {
+    display: grid;
+  }
+
+  .library-header-actions {
+    justify-content: flex-start;
+  }
+
+  .library-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .library-context {
+    grid-template-columns: 1fr;
+  }
+}
+
+.library-content {
+  position: relative;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.library-content > .library-message {
+  height: 100%;
+}
+
+.library-content > .library-list {
+  height: auto;
+}
+
+@media (max-width: 620px) {
+  .library-expand-button {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+  }
+
+  .library-expand-label {
+    display: none;
+  }
+}

@@ -29,6 +29,16 @@ const elements = {
   aiSettingsButton: document.querySelector('#aiSettingsButton'),
   aiStatusBadge: document.querySelector('#aiStatusBadge'),
   libraryCount: document.querySelector('#libraryCount'),
+  libraryDialog: document.querySelector('#libraryDialog'),
+  libraryDialogSummary: document.querySelector('#libraryDialogSummary'),
+  openLibraryFolderButton: document.querySelector('#openLibraryFolderButton'),
+  closeLibraryButton: document.querySelector('#closeLibraryButton'),
+  librarySearchInput: document.querySelector('#librarySearchInput'),
+  libraryLanguageFilter: document.querySelector('#libraryLanguageFilter'),
+  libraryLoading: document.querySelector('#libraryLoading'),
+  libraryEmpty: document.querySelector('#libraryEmpty'),
+  libraryNoResults: document.querySelector('#libraryNoResults'),
+  libraryList: document.querySelector('#libraryList'),
   playerStage: document.querySelector('#playerStage'),
   videoPlayer: document.querySelector('#videoPlayer'),
   emptyState: document.querySelector('#emptyState'),
@@ -72,7 +82,10 @@ const state = {
   toastTimer: null,
   dragDepth: 0,
   targetLanguage: null,
-  aiStatus: { configured: false, source: 'none' }
+  aiStatus: { configured: false, source: 'none' },
+  libraryItems: [],
+  libraryLoading: false,
+  expandedLibraryItemId: null
 };
 
 function setStatus(message, { error = false } = {}) {
@@ -733,6 +746,477 @@ async function loadLibrarySummary() {
   }
 }
 
+const LIBRARY_TYPE_LABELS = {
+  word: 'Kelime',
+  phrasal_verb: 'Phrasal verb',
+  idiom: 'Idiom',
+  fixed_expression: 'Sabit ifade'
+};
+
+
+function libraryTypeLabel(unitType) {
+  return LIBRARY_TYPE_LABELS[unitType] || 'Diğer';
+}
+
+function formatSavedDate(value) {
+  if (!value) return 'Tarih bilinmiyor';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Tarih bilinmiyor';
+
+  return new Intl.DateTimeFormat('tr-TR', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date);
+}
+
+function appendMeta(container, text) {
+  if (!text) return;
+  const span = document.createElement('span');
+  span.textContent = text;
+  container.append(span);
+}
+
+function clipFilterStatus(context) {
+  if (!context?.clipId) return 'missing';
+  return context.clipStatus || 'missing';
+}
+
+function libraryLanguageKey(value) {
+  if (!value) return '';
+
+  try {
+    return normalizeLanguageCode(value).toLocaleLowerCase('en');
+  } catch {
+    return String(value).trim().toLocaleLowerCase('en');
+  }
+}
+
+function selectedLibraryLanguage() {
+  return elements.libraryLanguageFilter.value || 'all';
+}
+
+function contextsForLibraryLanguage(item) {
+  const languageFilter = selectedLibraryLanguage();
+  const contexts = item.contexts || [];
+
+  if (languageFilter === 'all') return contexts;
+
+  return contexts.filter((context) =>
+    libraryLanguageKey(context.targetLanguage) === libraryLanguageKey(languageFilter)
+  );
+}
+
+function refreshLibraryLanguageFilterOptions() {
+  const previousValue = selectedLibraryLanguage();
+  const languageCodes = new Map();
+
+  for (const item of state.libraryItems) {
+    for (const context of item.contexts || []) {
+      const normalizedKey = libraryLanguageKey(context.targetLanguage);
+      if (!normalizedKey || languageCodes.has(normalizedKey)) continue;
+      languageCodes.set(normalizedKey, String(context.targetLanguage).trim());
+    }
+  }
+
+  elements.libraryLanguageFilter.replaceChildren();
+
+  const allOption = document.createElement('option');
+  allOption.value = 'all';
+  allOption.textContent = 'Tüm diller';
+  elements.libraryLanguageFilter.append(allOption);
+
+  const sortedCodes = [...languageCodes.values()].sort((first, second) =>
+    getLanguageName(first).localeCompare(getLanguageName(second), 'tr')
+  );
+
+  for (const languageCode of sortedCodes) {
+    const option = document.createElement('option');
+    option.value = languageCode;
+    option.textContent = `${getLanguageName(languageCode)} (${languageCode})`;
+    elements.libraryLanguageFilter.append(option);
+  }
+
+  const canRestorePreviousValue = Array.from(elements.libraryLanguageFilter.options)
+    .some((option) => libraryLanguageKey(option.value) === libraryLanguageKey(previousValue));
+
+  elements.libraryLanguageFilter.value = canRestorePreviousValue ? previousValue : 'all';
+}
+
+function itemMatchesLibraryFilters(item) {
+  const query = elements.librarySearchInput.value.trim().toLocaleLowerCase('en');
+  const matchingContexts = contextsForLibraryLanguage(item);
+
+  if (matchingContexts.length === 0) return false;
+  if (!query) return true;
+
+  const searchableText = [
+    item.term,
+    item.lemma,
+    item.normalizedTerm,
+    ...(item.surfaceForms || []),
+    ...matchingContexts.flatMap((context) => [
+      context.sourceSentence,
+      context.translatedSentence,
+      context.videoName,
+      context.targetLanguage,
+      getLanguageName(context.targetLanguage)
+    ])
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .toLocaleLowerCase('en');
+
+  return searchableText.includes(query);
+}
+
+async function prepareLibraryClipPlayback(video) {
+  elements.videoPlayer.pause();
+  elements.libraryList.querySelectorAll('.library-clip-video').forEach((otherVideo) => {
+    if (otherVideo !== video && !otherVideo.paused) otherVideo.pause();
+  });
+
+  const selectedDeviceId = elements.audioOutputSelect.value || '';
+  if (selectedDeviceId && typeof video.setSinkId === 'function') {
+    try {
+      await video.setSinkId(selectedDeviceId);
+    } catch (error) {
+      setStatus(`Kütüphane klibinin ses çıkışı değiştirilemedi: ${error.message}`, { error: true });
+    }
+  }
+}
+
+function createLibraryClipPanel(context) {
+  const panel = document.createElement('div');
+  panel.className = 'library-clip-panel';
+  const status = clipFilterStatus(context);
+
+  if (status === 'ready' && context.clipUrl) {
+    const video = document.createElement('video');
+    video.className = 'library-clip-video';
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = context.clipUrl;
+    video.addEventListener('play', () => prepareLibraryClipPlayback(video));
+    video.addEventListener('error', () => {
+      setStatus('Kütüphane klibi açılamadı. Dosya silinmiş veya bozulmuş olabilir.', { error: true });
+    });
+    panel.append(video);
+    return panel;
+  }
+
+  const statusBox = document.createElement('div');
+  statusBox.className = `library-clip-status ${status}`;
+  const badge = document.createElement('span');
+  badge.className = 'library-clip-badge';
+
+  const title = document.createElement('strong');
+  const description = document.createElement('span');
+
+  if (status === 'processing') {
+    badge.textContent = 'Hazırlanıyor';
+    title.textContent = 'Sahne klibi arka planda hazırlanıyor';
+    description.textContent = 'Hazır olduğunda bu ekran otomatik olarak güncellenecek.';
+  } else if (status === 'failed') {
+    badge.textContent = 'Klip hatası';
+    title.textContent = 'Kelime kaydedildi, fakat klip oluşturulamadı';
+    description.textContent = 'Aynı kelimeyi sahnede yeniden kaydetmek klibi tekrar deneyecektir.';
+  } else if (status === 'ready') {
+    badge.textContent = 'Dosya bulunamadı';
+    title.textContent = 'Klip kaydı var, ancak medya dosyası açılamıyor';
+    description.textContent = 'library-media klasöründeki dosya taşınmış veya silinmiş olabilir.';
+  } else {
+    badge.textContent = 'Klipsiz';
+    title.textContent = 'Bu eski kayda sahne klibi eklenmemiş';
+    description.textContent = 'Kelimeyi videoda yeniden kaydederek klip oluşturabilirsin.';
+  }
+
+  statusBox.append(badge, title, description);
+
+  if (status === 'failed' && context.clipError) {
+    const error = document.createElement('small');
+    error.className = 'library-clip-error';
+    error.textContent = context.clipError;
+    statusBox.append(error);
+  }
+
+  panel.append(statusBox);
+  return panel;
+}
+
+function createLibraryContext(context) {
+  const section = document.createElement('section');
+  section.className = 'library-context';
+
+  const textBlock = document.createElement('div');
+  textBlock.className = 'library-context-text';
+
+  const source = document.createElement('p');
+  source.className = 'library-source-sentence';
+  source.textContent = context.sourceSentence || 'İngilizce cümle kaydedilmemiş.';
+  textBlock.append(source);
+
+  if (context.translatedSentence) {
+    const translation = document.createElement('p');
+    translation.className = 'library-translated-sentence';
+    translation.textContent = context.translatedSentence;
+    textBlock.append(translation);
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'library-context-meta';
+  appendMeta(meta, context.targetLanguage
+    ? `Çeviri: ${getLanguageName(context.targetLanguage)}`
+    : null);
+  appendMeta(meta, context.videoName || null);
+
+  if (Number.isFinite(context.subtitleStartMs) && Number.isFinite(context.subtitleEndMs)) {
+    appendMeta(
+      meta,
+      `${formatMilliseconds(context.subtitleStartMs)}–${formatMilliseconds(context.subtitleEndMs)}`
+    );
+  }
+
+  appendMeta(meta, context.savedAt ? `Kaydedildi: ${formatSavedDate(context.savedAt)}` : null);
+  textBlock.append(meta);
+  section.append(textBlock, createLibraryClipPanel(context));
+  return section;
+}
+
+function createLibraryCard(item, visibleContexts = item.contexts || []) {
+  const article = document.createElement('article');
+  article.className = 'library-card';
+  article.dataset.itemId = item.id;
+
+  const header = document.createElement('header');
+  header.className = 'library-card-header';
+
+  const contextsId = `library-contexts-${String(item.id || item.term || Math.random())
+    .replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  // Keep the library as an accordion: cards start compact and only one
+  // item can be expanded at a time. This prevents a long library from
+  // compressing every card into the available dialog height.
+  let expanded = state.expandedLibraryItemId === item.id;
+
+  const termBlock = document.createElement('div');
+  termBlock.className = 'library-term-block';
+  const termRow = document.createElement('div');
+  termRow.className = 'library-term-row';
+
+  const term = document.createElement('h3');
+  term.className = 'library-term';
+  term.textContent = item.term || item.lemma || item.normalizedTerm || 'Adsız kayıt';
+
+  const typeBadge = document.createElement('span');
+  typeBadge.className = `library-unit-badge ${item.unitType || 'word'}`;
+  typeBadge.textContent = libraryTypeLabel(item.unitType || 'word');
+  termRow.append(term, typeBadge);
+
+  const termMeta = document.createElement('p');
+  termMeta.className = 'library-term-meta';
+  const totalContextCount = (item.contexts || []).length;
+  const visibleContextCount = visibleContexts.length;
+  const contextText = visibleContextCount === totalContextCount
+    ? `${totalContextCount} bağlam`
+    : `${visibleContextCount} gösterilen · ${totalContextCount} toplam bağlam`;
+  const saveCount = Number(item.timesSaved || 1);
+  const lemmaText = item.lemma && item.lemma !== item.term ? ` · Temel biçim: ${item.lemma}` : '';
+  termMeta.textContent = `${contextText} · ${saveCount} kez kaydedildi${lemmaText} · Son kayıt: ${formatSavedDate(item.lastSavedAt)}`;
+
+  termBlock.append(termRow, termMeta);
+
+  const cardActions = document.createElement('div');
+  cardActions.className = 'library-card-actions';
+
+  const toggleButton = document.createElement('button');
+  toggleButton.type = 'button';
+  toggleButton.className = 'library-expand-button';
+  toggleButton.setAttribute('aria-controls', contextsId);
+
+  const toggleLabel = document.createElement('span');
+  toggleLabel.className = 'library-expand-label';
+
+  const toggleIcon = document.createElement('span');
+  toggleIcon.className = 'library-expand-icon';
+  toggleIcon.setAttribute('aria-hidden', 'true');
+  toggleButton.append(toggleLabel, toggleIcon);
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'library-delete-button';
+  deleteButton.textContent = 'Sil';
+  deleteButton.title = 'Kelimeyi, tüm bağlamlarını ve yalnızca ona ait klipleri sil';
+  deleteButton.addEventListener('click', async () => {
+    const displayTerm = item.term || item.lemma || 'Bu kayıt';
+    const confirmed = window.confirm(
+      `“${displayTerm}” kütüphaneden silinsin mi?\n\nTüm cümle bağlamları ve başka kayıtta kullanılmayan sahne klipleri de silinecek.`
+    );
+    if (!confirmed) return;
+
+    deleteButton.disabled = true;
+    try {
+      const result = await desktopAPI.deleteLibraryItem(item.id);
+      elements.libraryCount.textContent = String(result.totalWords);
+      if (state.expandedLibraryItemId === item.id) state.expandedLibraryItemId = null;
+      showToast(`“${result.deletedTerm || displayTerm}” kütüphaneden silindi.`);
+      await refreshLibraryItems();
+    } catch (error) {
+      setStatus(`Kütüphane kaydı silinemedi: ${error.message}`, { error: true });
+      showToast('Kayıt silinemedi.');
+      deleteButton.disabled = false;
+    }
+  });
+
+  cardActions.append(toggleButton, deleteButton);
+  header.append(termBlock, cardActions);
+  article.append(header);
+
+  const contexts = document.createElement('div');
+  contexts.className = 'library-contexts';
+  contexts.id = contextsId;
+  const sortedContexts = [...visibleContexts]
+    .sort((first, second) => String(second.savedAt || '').localeCompare(String(first.savedAt || '')));
+
+  if (sortedContexts.length === 0) {
+    const emptyContext = document.createElement('div');
+    emptyContext.className = 'library-message';
+    emptyContext.textContent = 'Bu kaydın cümle bağlamı bulunmuyor.';
+    contexts.append(emptyContext);
+  } else {
+    sortedContexts.forEach((context) => contexts.append(createLibraryContext(context)));
+  }
+
+  function applyExpandedState() {
+    article.classList.toggle('collapsed', !expanded);
+    article.classList.toggle('is-expanded', expanded);
+    contexts.classList.toggle('is-visible', expanded);
+
+    // Use both the native hidden state and an inline display fallback. This
+    // prevents stale or platform-specific CSS from leaving a card labelled
+    // “Gizle” while its sentence and scene clip remain invisible.
+    contexts.hidden = !expanded;
+    contexts.style.display = expanded ? 'block' : 'none';
+    contexts.setAttribute('aria-hidden', String(!expanded));
+
+    toggleButton.setAttribute('aria-expanded', String(expanded));
+    toggleLabel.textContent = expanded ? 'Gizle' : 'Detaylar';
+    toggleButton.title = expanded ? 'Cümle bağlamlarını daralt' : 'Cümle bağlamlarını genişlet';
+    toggleButton.setAttribute('aria-label', expanded
+      ? `${term.textContent} bağlamlarını daralt`
+      : `${term.textContent} bağlamlarını genişlet`);
+  }
+
+  toggleButton.addEventListener('click', () => {
+    const willExpand = !expanded;
+    state.expandedLibraryItemId = willExpand ? item.id : null;
+
+    // Re-rendering keeps every other card collapsed and rebuilds the media
+    // controls in a clean state. The scroll position is restored so opening
+    // a card does not throw the user back to the top of the library.
+    const libraryScroller = elements.libraryList.parentElement;
+    const previousScrollTop = libraryScroller?.scrollTop || 0;
+    renderLibraryItems();
+
+    requestAnimationFrame(() => {
+      if (libraryScroller) libraryScroller.scrollTop = previousScrollTop;
+      const reopenedCard = Array.from(elements.libraryList.querySelectorAll('.library-card'))
+        .find((candidate) => candidate.dataset.itemId === String(item.id));
+      if (willExpand) reopenedCard?.scrollIntoView({ block: 'nearest' });
+      reopenedCard?.querySelector('.library-expand-button')?.focus({ preventScroll: true });
+    });
+  });
+
+  termBlock.addEventListener('click', () => toggleButton.click());
+  termBlock.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    toggleButton.click();
+  });
+  termBlock.tabIndex = 0;
+  termBlock.setAttribute('role', 'button');
+
+  article.append(contexts);
+  applyExpandedState();
+  return article;
+}
+
+function updateLibrarySummaryText(visibleItems = state.libraryItems) {
+  const visibleContexts = visibleItems.flatMap((item) => contextsForLibraryLanguage(item));
+  const readyClipIds = new Set(
+    visibleContexts
+      .filter((context) => context.clipStatus === 'ready' && context.clipUrl)
+      .map((context) => context.clipId)
+      .filter(Boolean)
+  );
+  const contextCount = visibleContexts.length;
+  const languageFilter = selectedLibraryLanguage();
+  const languageText = languageFilter === 'all'
+    ? ''
+    : ` · Dil: ${getLanguageName(languageFilter)}`;
+  const filteredText = visibleItems.length !== state.libraryItems.length
+    ? ` · ${visibleItems.length} sonuç gösteriliyor`
+    : '';
+
+  elements.libraryDialogSummary.textContent =
+    `${visibleItems.length} kelime/ifade · ${contextCount} cümle bağlamı · ${readyClipIds.size} oynatılabilir sahne klibi${languageText}${filteredText}`;
+}
+
+function renderLibraryItems() {
+  elements.libraryNoResults.querySelector('strong').textContent = 'Aramana uyan kayıt bulunamadı.';
+  elements.libraryNoResults.querySelector('span').textContent = 'Arama metnini veya filtreleri değiştirmeyi dene.';
+
+  const filteredItems = state.libraryItems
+    .filter(itemMatchesLibraryFilters)
+    .sort((first, second) => String(second.lastSavedAt || '').localeCompare(String(first.lastSavedAt || '')));
+
+  elements.libraryList.replaceChildren();
+  elements.libraryLoading.hidden = true;
+  elements.libraryEmpty.hidden = state.libraryItems.length !== 0;
+  elements.libraryNoResults.hidden = state.libraryItems.length === 0 || filteredItems.length !== 0;
+  updateLibrarySummaryText(filteredItems);
+
+  filteredItems.forEach((item) =>
+    elements.libraryList.append(createLibraryCard(item, contextsForLibraryLanguage(item)))
+  );
+}
+
+async function refreshLibraryItems() {
+  if (state.libraryLoading) return;
+  state.libraryLoading = true;
+  elements.libraryLoading.hidden = false;
+  elements.libraryEmpty.hidden = true;
+  elements.libraryNoResults.hidden = true;
+  elements.libraryList.replaceChildren();
+
+  try {
+    const result = await desktopAPI.getLibraryItems();
+    state.libraryItems = Array.isArray(result.items) ? result.items : [];
+    elements.libraryCount.textContent = String(result.totalWords ?? state.libraryItems.length);
+    refreshLibraryLanguageFilterOptions();
+    renderLibraryItems();
+  } catch (error) {
+    elements.libraryLoading.hidden = true;
+    elements.libraryDialogSummary.textContent = 'Kütüphane yüklenemedi.';
+    elements.libraryNoResults.hidden = false;
+    elements.libraryNoResults.querySelector('strong').textContent = 'Kütüphane açılamadı.';
+    elements.libraryNoResults.querySelector('span').textContent = error.message;
+    setStatus(`Kütüphane açılamadı: ${error.message}`, { error: true });
+  } finally {
+    state.libraryLoading = false;
+  }
+}
+
+async function openLibraryDialog() {
+  elements.videoPlayer.pause();
+  if (!elements.libraryDialog.open) elements.libraryDialog.showModal();
+  elements.librarySearchInput.focus();
+  await refreshLibraryItems();
+}
+
+function closeLibraryDialog() {
+  elements.libraryList.querySelectorAll('.library-clip-video').forEach((video) => video.pause());
+  if (elements.libraryDialog.open) elements.libraryDialog.close();
+}
+
 function isFileDrag(event) {
   return Array.from(event.dataTransfer?.types || []).includes('Files');
 }
@@ -899,12 +1383,29 @@ elements.audioOutputSelect.addEventListener('change', async () => {
   }
 });
 
-elements.revealLibraryButton.addEventListener('click', async () => {
+elements.revealLibraryButton.addEventListener('click', openLibraryDialog);
+elements.closeLibraryButton.addEventListener('click', closeLibraryDialog);
+elements.libraryDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeLibraryDialog();
+});
+elements.libraryDialog.addEventListener('close', () => {
+  elements.libraryList.querySelectorAll('.library-clip-video').forEach((video) => video.pause());
+});
+elements.librarySearchInput.addEventListener('input', () => {
+  state.expandedLibraryItemId = null;
+  renderLibraryItems();
+});
+elements.libraryLanguageFilter.addEventListener('change', () => {
+  state.expandedLibraryItemId = null;
+  renderLibraryItems();
+});
+elements.openLibraryFolderButton.addEventListener('click', async () => {
   try {
     const summary = await desktopAPI.revealLibraryFile();
-    showToast(`Kütüphane dosyası gösterildi: ${summary.totalWords} kelime.`);
+    showToast(`Kütüphane klasörü açıldı: ${summary.totalWords} kelime/ifade.`);
   } catch (error) {
-    setStatus(`Kütüphane dosyası gösterilemedi: ${error.message}`, { error: true });
+    setStatus(`Kütüphane klasörü açılamadı: ${error.message}`, { error: true });
   }
 });
 
@@ -967,7 +1468,7 @@ window.addEventListener('drop', async (event) => {
 });
 
 async function handleGlobalShortcut(event) {
-  if (elements.languageDialog.open || isTypingTarget(event.target)) return;
+  if (elements.languageDialog.open || elements.aiDialog.open || elements.libraryDialog.open || isTypingTarget(event.target)) return;
 
   const isSpace = event.code === 'Space';
   const isTranslationShortcut = event.key.toLowerCase() === 't';
@@ -1006,7 +1507,7 @@ window.addEventListener('keydown', handleGlobalShortcut, { capture: true });
 
 // Prevent the keyup event from reaching Chromium's built-in media controls too.
 window.addEventListener('keyup', (event) => {
-  if (isTypingTarget(event.target)) return;
+  if (elements.languageDialog.open || elements.aiDialog.open || elements.libraryDialog.open || isTypingTarget(event.target)) return;
   if (event.code !== 'Space') return;
 
   event.preventDefault();
@@ -1023,6 +1524,7 @@ desktopAPI.onConversionProgress((payload) => {
 desktopAPI.onLibraryClipStatus((payload) => {
   if (payload.status === 'ready') {
     showToast(payload.message || 'Sahne klibi hazır.');
+    if (elements.libraryDialog.open) refreshLibraryItems();
     return;
   }
 
@@ -1032,6 +1534,7 @@ desktopAPI.onLibraryClipStatus((payload) => {
       { error: true }
     );
     showToast(payload.message || 'Sahne klibi hazırlanamadı.');
+    if (elements.libraryDialog.open) refreshLibraryItems();
   }
 });
 

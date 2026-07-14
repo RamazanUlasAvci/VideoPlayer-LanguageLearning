@@ -4,6 +4,10 @@ An Electron desktop video player designed for learning English from local videos
 
 The app plays local video files, synchronizes external `.srt` subtitles, translates the currently visible English subtitle on demand, and saves the English word or multiword expression that should be learned together with its full sentence context.
 
+## Learning library screen
+
+The in-app library lists every saved English word or multi-word expression together with its full sentence context, translation, video name, timestamp, and independent scene clip. It supports search, filtering by translation language, direct clip playback, and deletion. Deleting an entry also removes scene clips that are no longer referenced by another saved item.
+
 ## Features
 
 - Open `.mp4`, `.mkv`, `.mov`, `.m4v`, and `.webm` video files
@@ -220,3 +224,8 @@ The automated tests cover:
 ## License note
 
 Before redistributing the bundled `ffmpeg-static` binary, review the license terms of the specific FFmpeg build. Commercial distribution should include a proper license review.
+
+
+### Library layout
+
+The in-app library uses a single-open accordion and an independently scrollable content area, so expanding a saved item reveals its sentence, translation, metadata, and scene clip without compressing the other cards.

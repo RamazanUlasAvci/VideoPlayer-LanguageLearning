@@ -368,6 +368,55 @@ class LearningLibraryStore {
     });
   }
 
+  async getItems() {
+    const data = await this.readData();
+
+    return {
+      version: data.version,
+      items: structuredClone(data.items)
+    };
+  }
+
+  async deleteItem(itemId) {
+    const normalizedItemId = String(itemId || '').trim();
+    if (!normalizedItemId) throw new Error('Silinecek kütüphane öğesinin kimliği eksik.');
+
+    return this.withWriteLock(async () => {
+      const data = await this.readData();
+      const itemIndex = data.items.findIndex((item) => item.id === normalizedItemId);
+
+      if (itemIndex < 0) {
+        throw new Error('Kütüphane öğesi bulunamadı.');
+      }
+
+      const [removedItem] = data.items.splice(itemIndex, 1);
+      const candidateClipIds = new Set(
+        (removedItem.contexts || [])
+          .map((context) => context.clipId)
+          .filter(Boolean)
+      );
+      const referencedClipIds = new Set();
+
+      for (const item of data.items) {
+        for (const context of item.contexts || []) {
+          if (context.clipId) referencedClipIds.add(context.clipId);
+        }
+      }
+
+      const orphanClipIds = [...candidateClipIds]
+        .filter((clipId) => !referencedClipIds.has(clipId));
+
+      data.version = CURRENT_LIBRARY_VERSION;
+      await this.writeData(data);
+
+      return {
+        totalWords: data.items.length,
+        deletedTerm: removedItem.term || removedItem.normalizedTerm || '',
+        orphanClipIds
+      };
+    });
+  }
+
   async getSummary() {
     const data = await this.readData();
     const clipStatuses = { ready: 0, processing: 0, failed: 0 };

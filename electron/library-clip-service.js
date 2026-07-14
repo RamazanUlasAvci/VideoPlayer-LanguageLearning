@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { pathToFileURL } = require('node:url');
 
 const DEFAULT_PADDING_MS = 400;
 
@@ -22,6 +23,7 @@ class LibraryClipService {
     this.libraryStore = libraryStore;
     this.getFfmpegPath = getFfmpegPath;
     this.runningJobs = new Map();
+    this.discardedClipIds = new Set();
   }
 
   async ensureDirectory() {
@@ -74,6 +76,7 @@ class LibraryClipService {
 
   async queueClip(descriptor, { sender, term } = {}) {
     await this.ensureDirectory();
+    this.discardedClipIds.delete(descriptor.clipId);
 
     if (await this.outputExists(descriptor)) {
       await this.libraryStore.updateClipStatus(descriptor.clipId, {
@@ -103,6 +106,49 @@ class LibraryClipService {
 
     this.runningJobs.set(descriptor.clipId, job);
     return { status: 'processing', clipPath: descriptor.relativePath };
+  }
+
+  async getPlayableUrl(relativePath) {
+    const normalized = String(relativePath || '').replaceAll('\\', '/');
+    const expectedPrefix = 'library-media/';
+
+    if (!normalized.startsWith(expectedPrefix)) return null;
+
+    const fileName = path.posix.basename(normalized);
+    if (!fileName || fileName !== normalized.slice(expectedPrefix.length)) return null;
+
+    const absolutePath = path.join(this.mediaDirectory, fileName);
+
+    try {
+      const stats = await fs.stat(absolutePath);
+      if (!stats.isFile() || stats.size <= 0) return null;
+      return pathToFileURL(absolutePath).href;
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteClips(clipIds) {
+    const uniqueClipIds = [...new Set(
+      (clipIds || [])
+        .map((clipId) => String(clipId || '').trim())
+        .filter((clipId) => /^[a-zA-Z0-9_-]+$/.test(clipId))
+    )];
+
+    await this.ensureDirectory();
+
+    for (const clipId of uniqueClipIds) {
+      this.discardedClipIds.add(clipId);
+      await fs.rm(path.join(this.mediaDirectory, `${clipId}.mp4`), { force: true });
+
+      const entries = await fs.readdir(this.mediaDirectory).catch(() => []);
+      const temporaryPrefix = `${clipId}.`;
+      await Promise.all(entries
+        .filter((entry) => entry.startsWith(temporaryPrefix) && entry.endsWith('.tmp.mp4'))
+        .map((entry) => fs.rm(path.join(this.mediaDirectory, entry), { force: true })));
+    }
+
+    return { deletedClipIds: uniqueClipIds };
   }
 
   async generateClip(descriptor, { sender, term } = {}) {
@@ -167,6 +213,12 @@ class LibraryClipService {
 
       await fs.rm(descriptor.outputPath, { force: true });
       await fs.rename(temporaryPath, descriptor.outputPath);
+
+      if (this.discardedClipIds.has(descriptor.clipId)) {
+        await fs.rm(descriptor.outputPath, { force: true });
+        return;
+      }
+
       await this.libraryStore.updateClipStatus(descriptor.clipId, {
         status: 'ready',
         clipPath: descriptor.relativePath,

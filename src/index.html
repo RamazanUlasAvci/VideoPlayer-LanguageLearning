@@ -54,7 +54,7 @@
       </div>
 
       <div class="library-control">
-        <button id="revealLibraryButton" type="button">
+        <button id="revealLibraryButton" type="button" title="Öğrenme kütüphanesini aç">
           Kütüphane: <strong id="libraryCount">0</strong>
         </button>
       </div>
@@ -140,6 +140,49 @@
         <button id="closeAiDialogButton" type="button">Kapat</button>
       </div>
       <p id="aiDialogStatus" class="dialog-status" role="status"></p>
+    </div>
+  </dialog>
+
+  <dialog id="libraryDialog" class="library-dialog" aria-labelledby="libraryDialogTitle">
+    <div class="library-dialog-shell">
+      <header class="library-dialog-header">
+        <div>
+          <span class="library-eyebrow">Learning library</span>
+          <h2 id="libraryDialogTitle">Kaydettiğin İngilizce kelime ve ifadeler</h2>
+          <p id="libraryDialogSummary">Kütüphane yükleniyor…</p>
+        </div>
+        <div class="library-header-actions">
+          <button id="openLibraryFolderButton" type="button">Dosya klasörünü aç</button>
+          <button id="closeLibraryButton" type="button" aria-label="Kütüphaneyi kapat">Kapat</button>
+        </div>
+      </header>
+
+      <div class="library-toolbar">
+        <label class="library-search">
+          <span>Ara</span>
+          <input id="librarySearchInput" type="search" placeholder="Kelime, ifade, cümle veya video ara…" autocomplete="off">
+        </label>
+
+        <label>
+          <span>Dil</span>
+          <select id="libraryLanguageFilter">
+            <option value="all">Tüm diller</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="library-content">
+        <div id="libraryLoading" class="library-message">Kütüphane yükleniyor…</div>
+        <div id="libraryEmpty" class="library-message" hidden>
+          <strong>Henüz burada bir kayıt yok.</strong>
+          <span>Bir altyazıyı çevirip İngilizce kelime veya ifadeye tıkladığında kayıtlar burada görünecek.</span>
+        </div>
+        <div id="libraryNoResults" class="library-message" hidden>
+          <strong>Aramana uyan kayıt bulunamadı.</strong>
+          <span>Arama metnini veya filtreleri değiştirmeyi dene.</span>
+        </div>
+        <div id="libraryList" class="library-list" aria-live="polite"></div>
+      </div>
     </div>
   </dialog>
 

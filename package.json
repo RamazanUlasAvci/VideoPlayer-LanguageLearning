@@ -1,6 +1,6 @@
 {
   "name": "video-player-language-learning",
-  "version": "0.4.0",
+  "version": "0.6.4",
   "description": "An Electron desktop video player focused on subtitle translation and language learning.",
   "main": "electron/main.js",
   "author": "",

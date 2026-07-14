@@ -332,6 +332,31 @@ function registerIpcHandlers() {
     return libraryStore.getSummary();
   });
 
+  ipcMain.handle('library:list', async () => {
+    const library = await libraryStore.getItems();
+    const items = await Promise.all(library.items.map(async (item) => ({
+      ...item,
+      contexts: await Promise.all((item.contexts || []).map(async (context) => ({
+        ...context,
+        clipUrl: context.clipStatus === 'ready'
+          ? await libraryClipService.getPlayableUrl(context.clipPath)
+          : null
+      })))
+    })));
+
+    return {
+      version: library.version,
+      totalWords: items.length,
+      items
+    };
+  });
+
+  ipcMain.handle('library:delete-item', async (_event, payload) => {
+    const result = await libraryStore.deleteItem(payload?.itemId);
+    await libraryClipService.deleteClips(result.orphanClipIds);
+    return result;
+  });
+
   ipcMain.handle('library:reveal', async () => {
     const summary = await libraryStore.getSummary();
     shell.showItemInFolder(summary.filePath);

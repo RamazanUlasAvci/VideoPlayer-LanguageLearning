@@ -92,3 +92,28 @@ test('one ready scene clip updates every library context that shares the clip id
 
   await fs.rm(directory, { recursive: true, force: true });
 });
+
+test('library clip service exposes only valid media files and deletes them', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'language-player-clip-test-'));
+  const mediaDirectory = path.join(directory, 'library-media');
+  await fs.mkdir(mediaDirectory, { recursive: true });
+  const clipId = 'clip-for-library-ui';
+  const clipPath = path.join(mediaDirectory, `${clipId}.mp4`);
+  await fs.writeFile(clipPath, 'video-data');
+
+  const service = new LibraryClipService({
+    mediaDirectory,
+    libraryStore: {},
+    getFfmpegPath: () => 'ffmpeg'
+  });
+
+  const playableUrl = await service.getPlayableUrl(`library-media/${clipId}.mp4`);
+  assert.match(playableUrl, /^file:/);
+  assert.equal(await service.getPlayableUrl('../outside.mp4'), null);
+
+  const deletion = await service.deleteClips([clipId]);
+  assert.deepEqual(deletion.deletedClipIds, [clipId]);
+  await assert.rejects(fs.stat(clipPath));
+
+  await fs.rm(directory, { recursive: true, force: true });
+});
