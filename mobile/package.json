@@ -1,0 +1,31 @@
+{
+  "name": "vpll-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "doctor": "npx expo-doctor"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@vpll/core": "*",
+    "expo": "~57.0.6",
+    "expo-document-picker": "~57.0.0",
+    "expo-file-system": "~57.0.1",
+    "expo-status-bar": "~57.0.0",
+    "expo-video": "~57.0.1",
+    "fflate": "^0.8.2",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "~5.7.0"
+  },
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.3",
+    "@types/react": "~19.2.0",
+    "typescript": "~6.0.3"
+  }
+}

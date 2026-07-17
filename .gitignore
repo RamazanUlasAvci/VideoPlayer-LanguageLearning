@@ -16,3 +16,11 @@ Thumbs.db
 .idea/
 
 library-media/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/.env*
+
+# Mobile installation files
+*.apk
+*.aab

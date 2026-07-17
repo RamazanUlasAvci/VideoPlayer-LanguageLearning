@@ -152,6 +152,7 @@
           <p id="libraryDialogSummary">Kütüphane yükleniyor…</p>
         </div>
         <div class="library-header-actions">
+          <button id="exportMobileLibraryButton" type="button">Mobile aktar</button>
           <button id="openLibraryFolderButton" type="button">Dosya klasörünü aç</button>
           <button id="closeLibraryButton" type="button" aria-label="Kütüphaneyi kapat">Kapat</button>
         </div>
@@ -167,6 +168,20 @@
           <span>Dil</span>
           <select id="libraryLanguageFilter">
             <option value="all">Tüm diller</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Seviye</span>
+          <select id="libraryLevelFilter">
+            <option value="all">Tüm seviyeler</option>
+            <option value="A1">A1</option>
+            <option value="A2">A2</option>
+            <option value="B1">B1</option>
+            <option value="B2">B2</option>
+            <option value="C1">C1</option>
+            <option value="C2">C2</option>
+            <option value="UNKNOWN">Belirlenemedi</option>
           </select>
         </label>
       </div>

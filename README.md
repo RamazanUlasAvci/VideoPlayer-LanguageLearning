@@ -6,7 +6,7 @@ The app plays local video files, synchronizes external `.srt` subtitles, transla
 
 ## Learning library screen
 
-The in-app library lists every saved English word or multi-word expression together with its full sentence context, translation, video name, timestamp, and independent scene clip. It supports search, filtering by translation language, direct clip playback, and deletion. Deleting an entry also removes scene clips that are no longer referenced by another saved item.
+The in-app library lists every saved English word or multi-word expression together with its full sentence context, translation, contextual CEFR estimate, two concise dictionary-style definitions, part of speech, grammatical form, video name, timestamp, and independent scene clip. It supports search, filtering by translation language and CEFR level, direct clip playback, and deletion. Deleting an entry also removes scene clips that are no longer referenced by another saved item.
 
 ## Features
 
@@ -19,6 +19,11 @@ The in-app library lists every saved English word or multi-word expression toget
 - Choose the target translation language on first launch and remember it permanently
 - Change the target language later from the toolbar
 - Use Gemini to identify English phrasal verbs, idioms, fixed expressions, collocations, compound terms, and proper names
+- Estimate A1–C2 vocabulary difficulty for the word or expression as it is used in the current sentence
+- Enrich each clicked learning item with its base form, part of speech, grammatical surface form, and up to two concise English dictionary-style definitions
+- Create a cloze study prompt from the exact subtitle sentence, such as `At that time I [...] the information.`
+- Show a concise semantic hint in the selected translation language before revealing the answer
+- Filter the learning library by contextual CEFR level, including an `Undetermined` category for older or low-confidence records
 - Click any word in the **English subtitle**; the app automatically saves either that single word or the complete expression it belongs to
 - Always save the complete English sentence and its translation as context
 - Automatically cut an independent, audible MP4 scene clip for every saved subtitle context
@@ -57,6 +62,10 @@ Every item is stored with:
 - English term or expression
 - Normalized/base form when available
 - Unit type, such as `word`, `phrasal_verb`, `idiom`, or `fixed_expression`
+- Contextual CEFR estimate (`A1`–`C2` or `UNKNOWN`) and confidence
+- Dictionary/base lemma, part of speech, and the grammatical form used in the subtitle
+- Up to two concise English dictionary-style definitions, with the contextual sense first
+- A deterministic cloze question, a target-language semantic hint, and its answer
 - Full English subtitle sentence
 - Full translated sentence
 - Translation language used for that context
@@ -68,6 +77,32 @@ Every item is stored with:
 - Number of saves and all unique contexts
 
 The translation itself is not clickable. It is shown only as meaning support; learning items always come from the English subtitle.
+
+
+## Contextual CEFR estimates
+
+CEFR is stored on each sentence context rather than as a permanent property of a spelling. This matters because the same English word can have an easier literal meaning and a more advanced figurative or domain-specific meaning.
+
+For example, `run` in `run quickly`, `run a company`, and `run out of time` may receive different learning-unit and CEFR results. Gemini estimates the level in the same request that detects single-word and multiword learning units, so no second AI call is needed.
+
+The library displays the estimate as an AI-generated label and supports filtering by `A1`, `A2`, `B1`, `B2`, `C1`, `C2`, or `Undetermined`. Existing records created before this feature are migrated safely as `UNKNOWN`; they are not assigned a fabricated level.
+
+CEFR labels are content-difficulty metadata only. They do not replace future spaced-repetition scheduling, which should be based on the individual learner's review performance.
+
+## Dictionary enrichment and study-card preview
+
+When a learning item is clicked, Gemini performs one cached lexical-enrichment request for that term in its sentence. It returns the dictionary lemma, contextual part of speech, grammatical form of the surface word, and up to two concise English dictionary-style definitions. The first definition is required to match the sense used in the subtitle; the second is another common distinct sense when useful.
+
+The cloze prompt is not invented by AI. The application masks the exact clicked token span in the original subtitle, which preserves the authentic sentence and avoids hallucinated study questions. For example:
+
+```text
+Scene clip
+At that time I [...] the information.
+```
+
+The library initially shows the question, clip, and a short meaning hint in the selected translation language. The hint describes the contextual sense without containing the English answer. **Show answer** reveals the saved term, the complete source sentence, translation, part of speech, word form, base form, and dictionary definitions. Older records remain compatible and display a notice until they are saved again with the new metadata.
+
+Dictionary definitions are AI-generated dictionary-style explanations, not quotations from a licensed commercial dictionary. Successful lexical enrichments are cached in `lexical-enrichment-cache.json`. The cache key includes the target language because the same English item can require different hints for Turkish, Japanese, Norwegian, or another selected language.
 
 ## Automatic scene clips
 
@@ -118,11 +153,12 @@ The directory can contain:
 - `preferences.json`
 - `translation-cache.json`
 - `learning-unit-analysis-cache.json`
+- `lexical-enrichment-cache.json`
 - `learning-library.json`
 - `library-media/` — independent MP4 scene clips linked to learning contexts
 - `gemini-api-key.bin` — encrypted by the operating system
 
-The **Library** button reveals the learning-library file in the file manager.
+The **Library** button opens the in-app learning library. The **Open file folder** action inside that screen reveals the JSON file and scene clips in the file manager.
 
 ## Requirements
 
@@ -196,6 +232,9 @@ The automated tests cover:
 - English tokenization and source offsets
 - Local expression fallback behavior
 - Validation of non-overlapping AI spans
+- Contextual CEFR normalization for single words and multiword units
+- Lexical metadata sanitization, answer-safe semantic hints, and two-definition limits
+- Deterministic cloze-question generation using exact subtitle spans
 - Persistent English word/expression storage with multilingual sentence contexts
 - Stable scene-clip IDs, subtitle padding, and shared clip status updates
 
@@ -218,7 +257,8 @@ The automated tests cover:
 - FFmpeg conversion and scene clipping are fully local
 - The learning library and generated scene clips stay on the user's computer
 - Only the active subtitle sentence is sent to the translation provider
-- Only the active English sentence and its word tokens are sent to Gemini for phrase analysis
+- Only the active English sentence and its word tokens are sent to Gemini for phrase analysis and contextual CEFR estimation
+- When a learning item is clicked, only that term and its active sentence are sent to Gemini for dictionary-style lexical enrichment
 - Gemini Interactions requests are made with `store: false`
 
 ## License note
@@ -229,3 +269,20 @@ Before redistributing the bundled `ffmpeg-static` binary, review the license ter
 ### Library layout
 
 The in-app library uses a single-open accordion and an independently scrollable content area, so expanding a saved item reveals its sentence, translation, metadata, and scene clip without compressing the other cards.
+
+
+## Mobile companion app
+
+The repository now includes an Expo/React Native mobile companion in `mobile/` and shared library helpers in `packages/core/`.
+
+1. In the desktop app, open **Library** and select **Mobile aktar**.
+2. Move the generated `.vpll.zip` bundle to the phone.
+3. Start the mobile app and import the bundle.
+4. Study cards and independent scene clips work offline after import.
+
+```bash
+npm install
+npm run start:mobile
+```
+
+The current mobile milestone is intentionally a companion app. Full local movie playback, SRT selection and native clip extraction will be added after the shared study/library workflow is stable.

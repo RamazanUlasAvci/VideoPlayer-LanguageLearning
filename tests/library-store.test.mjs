@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { LearningLibraryStore } = require('../electron/library-store.js');
+const { LearningLibraryStore, createClozeQuestion } = require('../electron/library-store.js');
 
 test('learning library stores an English unit with full sentence context', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'language-player-test-'));
@@ -26,7 +26,21 @@ test('learning library stores an English unit with full sentence context', async
     targetLanguage: 'tr',
     analysisProvider: 'Gemini',
     analysisModel: 'gemini-3.5-flash',
-    confidence: 0.95
+    confidence: 0.95,
+    cefrLevel: 'B1',
+    cefrConfidence: 0.88,
+    cefrSource: 'gemini-context-estimate',
+    dictionaryLemma: 'give up',
+    partOfSpeech: 'phrasal_verb',
+    wordForm: 'base-form phrasal verb',
+    dictionaryDefinitions: [
+      'to stop trying to do something',
+      'to surrender or admit defeat'
+    ],
+    studyHint: 'to stop making an effort',
+    studyHintLanguage: 'en',
+    studyQuestion: 'I will not [...].',
+    studyAnswer: 'give up'
   });
 
   const second = await store.saveLearningUnit({
@@ -44,12 +58,24 @@ test('learning library stores an English unit with full sentence context', async
   assert.equal(second.wasExisting, true);
 
   const data = JSON.parse(await fs.readFile(filePath, 'utf8'));
-  assert.equal(data.version, 3);
+  assert.equal(data.version, 7);
   assert.equal(data.items[0].term, 'give up');
   assert.equal(data.items[0].unitType, 'phrasal_verb');
   assert.deepEqual(data.items[0].surfaceForms.sort(), ['gave up', 'give up']);
   assert.equal(data.items[0].contexts.length, 2);
   assert.equal(data.items[0].contexts[0].sourceSentence, 'I will not give up.');
+  assert.equal(data.items[0].contexts[0].cefrLevel, 'B1');
+  assert.equal(data.items[0].contexts[0].cefrConfidence, 0.88);
+  assert.equal(data.items[0].contexts[0].partOfSpeech, 'phrasal_verb');
+  assert.equal(data.items[0].contexts[0].wordForm, 'base-form phrasal verb');
+  assert.deepEqual(data.items[0].contexts[0].dictionaryDefinitions, [
+    'to stop trying to do something',
+    'to surrender or admit defeat'
+  ]);
+  assert.equal(data.items[0].contexts[0].studyHint, 'to stop making an effort');
+  assert.equal(data.items[0].contexts[0].studyHintLanguage, 'en');
+  assert.equal(data.items[0].contexts[0].studyQuestion, 'I will not [...].');
+  assert.equal(data.items[0].contexts[1].cefrLevel, 'UNKNOWN');
 
   await fs.rm(directory, { recursive: true, force: true });
 });
@@ -126,4 +152,17 @@ test('library items can be listed and deleted while preserving shared scene clip
   assert.deepEqual(secondDelete.orphanClipIds, ['shared-clip']);
 
   await fs.rm(directory, { recursive: true, force: true });
+});
+
+
+test('cloze questions replace the selected surface form while preserving the sentence', () => {
+  assert.equal(
+    createClozeQuestion('At that time I transferred the information.', 'transferred'),
+    'At that time I [...] the information.'
+  );
+
+  assert.equal(
+    createClozeQuestion('I give up, but I may give up again.', 'give up', 2, 9),
+    'I [...], but I may give up again.'
+  );
 });

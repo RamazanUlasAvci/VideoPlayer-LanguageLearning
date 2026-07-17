@@ -19,12 +19,14 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   clearGeminiApiKey: () => ipcRenderer.invoke('ai:clear-key'),
   analyzeLearningUnits: (sentence, tokens) =>
     ipcRenderer.invoke('learning:analyze-units', { sentence, tokens }),
+  enrichLearningUnit: (item) => ipcRenderer.invoke('learning:enrich-unit', item),
   saveLearningUnit: (item) => ipcRenderer.invoke('library:save-unit', item),
   saveLearningWord: (item) => ipcRenderer.invoke('library:save-word', item),
   getLibrarySummary: () => ipcRenderer.invoke('library:summary'),
   getLibraryItems: () => ipcRenderer.invoke('library:list'),
   deleteLibraryItem: (itemId) => ipcRenderer.invoke('library:delete-item', { itemId }),
   revealLibraryFile: () => ipcRenderer.invoke('library:reveal'),
+  exportLibraryForMobile: () => ipcRenderer.invoke('library:export-mobile'),
   onConversionProgress: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('video:conversion-progress', listener);

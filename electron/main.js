@@ -21,6 +21,7 @@ const { SettingsStore } = require('./settings-store');
 const { GeminiCredentialStore } = require('./credential-store');
 const { LearningUnitAnalysisService } = require('./ai-learning-service');
 const { LibraryClipService } = require('./library-clip-service');
+const { LibraryMobileExportService } = require('./library-mobile-export-service');
 
 let mainWindow = null;
 let libraryStore = null;
@@ -29,6 +30,7 @@ let settingsStore = null;
 let credentialStore = null;
 let learningUnitAnalysisService = null;
 let libraryClipService = null;
+let libraryMobileExportService = null;
 const allowedVideoPaths = new Set();
 const runningConversions = new Map();
 const supportedVideoExtensions = new Set(['.mp4', '.mkv', '.mov', '.webm', '.m4v']);
@@ -172,10 +174,15 @@ async function ensureStores() {
     path.join(userDataDirectory, 'learning-unit-analysis-cache.json'),
     credentialStore
   );
+  const libraryMediaDirectory = path.join(userDataDirectory, 'library-media');
   libraryClipService = new LibraryClipService({
-    mediaDirectory: path.join(userDataDirectory, 'library-media'),
+    mediaDirectory: libraryMediaDirectory,
     libraryStore,
     getFfmpegPath: getUsableFfmpegPath
+  });
+  libraryMobileExportService = new LibraryMobileExportService({
+    libraryStore,
+    mediaDirectory: libraryMediaDirectory
   });
   await Promise.all([
     libraryStore.ensureFile(),
@@ -273,6 +280,18 @@ function registerIpcHandlers() {
     });
   });
 
+  ipcMain.handle('learning:enrich-unit', async (_event, payload) => {
+    const preferences = await settingsStore.getPreferences();
+    return learningUnitAnalysisService.enrichUnit({
+      term: payload?.term,
+      lemma: payload?.lemma,
+      unitType: payload?.unitType,
+      sentence: payload?.sentence,
+      translatedSentence: payload?.translatedSentence,
+      targetLanguage: preferences.targetLanguage
+    });
+  });
+
   ipcMain.handle('library:save-unit', async (event, payload) => {
     const preferences = await settingsStore.getPreferences();
 
@@ -355,6 +374,18 @@ function registerIpcHandlers() {
     const result = await libraryStore.deleteItem(payload?.itemId);
     await libraryClipService.deleteClips(result.orphanClipIds);
     return result;
+  });
+
+
+  ipcMain.handle('library:export-mobile', async () => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Mobil kütüphane paketi oluştur',
+      defaultPath: `VideoPlayer-LanguageLearning-${new Date().toISOString().slice(0, 10)}.vpll.zip`,
+      filters: [{ name: 'VideoPlayer mobile library', extensions: ['zip'] }]
+    });
+
+    if (result.canceled || !result.filePath) return null;
+    return libraryMobileExportService.exportToZip(result.filePath);
   });
 
   ipcMain.handle('library:reveal', async () => {

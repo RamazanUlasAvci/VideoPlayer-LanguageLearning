@@ -14,6 +14,39 @@ const COMMON_TARGET_LANGUAGES = [
   'vi', 'cy'
 ];
 const languageDisplayNames = new Intl.DisplayNames(['tr', 'en'], { type: 'language' });
+const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+const CEFR_LABELS = {
+  A1: 'A1',
+  A2: 'A2',
+  B1: 'B1',
+  B2: 'B2',
+  C1: 'C1',
+  C2: 'C2',
+  UNKNOWN: 'Belirlenemedi'
+};
+
+const PART_OF_SPEECH_LABELS = {
+  noun: 'İsim (noun)',
+  verb: 'Fiil (verb)',
+  adjective: 'Sıfat (adjective)',
+  adverb: 'Zarf (adverb)',
+  pronoun: 'Zamir (pronoun)',
+  preposition: 'Edat (preposition)',
+  conjunction: 'Bağlaç (conjunction)',
+  interjection: 'Ünlem (interjection)',
+  determiner: 'Belirleyici (determiner)',
+  numeral: 'Sayı sözcüğü (numeral)',
+  auxiliary: 'Yardımcı fiil (auxiliary)',
+  modal: 'Modal fiil',
+  phrasal_verb: 'Phrasal verb',
+  idiom: 'Deyim (idiom)',
+  fixed_expression: 'Sabit ifade',
+  collocation: 'Eşdizim (collocation)',
+  compound_term: 'Bileşik terim',
+  proper_name: 'Özel ad',
+  other: 'Diğer',
+  unknown: 'Belirlenemedi'
+};
 
 
 const elements = {
@@ -31,10 +64,12 @@ const elements = {
   libraryCount: document.querySelector('#libraryCount'),
   libraryDialog: document.querySelector('#libraryDialog'),
   libraryDialogSummary: document.querySelector('#libraryDialogSummary'),
+  exportMobileLibraryButton: document.querySelector('#exportMobileLibraryButton'),
   openLibraryFolderButton: document.querySelector('#openLibraryFolderButton'),
   closeLibraryButton: document.querySelector('#closeLibraryButton'),
   librarySearchInput: document.querySelector('#librarySearchInput'),
   libraryLanguageFilter: document.querySelector('#libraryLanguageFilter'),
+  libraryLevelFilter: document.querySelector('#libraryLevelFilter'),
   libraryLoading: document.querySelector('#libraryLoading'),
   libraryEmpty: document.querySelector('#libraryEmpty'),
   libraryNoResults: document.querySelector('#libraryNoResults'),
@@ -118,6 +153,39 @@ function normalizeLanguageCode(value) {
   } catch {
     throw new Error('Dil kodu geçerli değil. Örnek: tr, de, ja veya pt-BR.');
   }
+}
+
+function normalizeCefrLevel(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return CEFR_LEVELS.includes(normalized) ? normalized : 'UNKNOWN';
+}
+
+function cefrLabel(value) {
+  return CEFR_LABELS[normalizeCefrLevel(value)] || CEFR_LABELS.UNKNOWN;
+}
+
+function partOfSpeechLabel(value) {
+  const normalized = String(value || 'unknown').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return PART_OF_SPEECH_LABELS[normalized] || PART_OF_SPEECH_LABELS.unknown;
+}
+
+function createStudyQuestion(sentence, sourceStart, sourceEnd, fallbackTerm) {
+  const text = String(sentence || '');
+  if (
+    Number.isInteger(sourceStart) &&
+    Number.isInteger(sourceEnd) &&
+    sourceStart >= 0 &&
+    sourceEnd > sourceStart &&
+    sourceEnd <= text.length
+  ) {
+    return `${text.slice(0, sourceStart)}[...]${text.slice(sourceEnd)}`;
+  }
+
+  const term = String(fallbackTerm || '').trim();
+  const index = text.toLocaleLowerCase('en').indexOf(term.toLocaleLowerCase('en'));
+  return index >= 0
+    ? `${text.slice(0, index)}[...]${text.slice(index + term.length)}`
+    : text;
 }
 
 function getLanguageName(languageCode) {
@@ -414,16 +482,27 @@ function renderTranslation(translatedText) {
 function buildLearningUnits(cue, tokenization, analysis) {
   const unitsByToken = new Map();
   const multiwordUnits = Array.isArray(analysis?.units) ? analysis.units : [];
+  const wordLevels = new Map(
+    (Array.isArray(analysis?.wordLevels) ? analysis.wordLevels : [])
+      .map((entry) => [Number(entry.tokenIndex), entry])
+  );
 
   for (const token of tokenization.wordTokens) {
+    const wordLevel = wordLevels.get(token.index);
     unitsByToken.set(token.index, {
       id: `word-${token.index}`,
       startToken: token.index,
       endToken: token.index,
+      sourceStart: token.start,
+      sourceEnd: token.end,
       term: token.text,
-      lemma: token.text.toLocaleLowerCase('en'),
+      lemma: wordLevel?.lemma || token.text.toLocaleLowerCase('en'),
       unitType: 'word',
-      confidence: null
+      confidence: null,
+      cefrLevel: normalizeCefrLevel(wordLevel?.cefrLevel),
+      cefrConfidence: Number.isFinite(wordLevel?.cefrConfidence)
+        ? wordLevel.cefrConfidence
+        : null
     });
   }
 
@@ -440,10 +519,16 @@ function buildLearningUnits(cue, tokenization, analysis) {
       id: `unit-${unit.startToken}-${unit.endToken}`,
       startToken: unit.startToken,
       endToken: unit.endToken,
+      sourceStart: tokenization.wordTokens[unit.startToken]?.start ?? null,
+      sourceEnd: tokenization.wordTokens[unit.endToken]?.end ?? null,
       term,
       lemma: unit.lemma || term.toLocaleLowerCase('en'),
       unitType: unit.type || 'fixed_expression',
-      confidence: Number.isFinite(unit.confidence) ? unit.confidence : null
+      confidence: Number.isFinite(unit.confidence) ? unit.confidence : null,
+      cefrLevel: normalizeCefrLevel(unit.cefrLevel),
+      cefrConfidence: Number.isFinite(unit.cefrConfidence)
+        ? unit.cefrConfidence
+        : null
     };
 
     for (let index = unit.startToken; index <= unit.endToken; index += 1) {
@@ -467,10 +552,44 @@ function setUnitSaved(unitId) {
 }
 
 async function saveLearningUnit(unit, cue, translatedText, analysis) {
+  showToast(`“${unit.term}” için sözlük bilgileri hazırlanıyor…`);
+
+  let lexical = {
+    lemma: unit.lemma,
+    partOfSpeech: unit.unitType === 'word' ? 'unknown' : unit.unitType,
+    wordForm: '',
+    dictionaryDefinitions: [],
+    studyHint: '',
+    studyHintLanguage: 'en',
+    provider: 'local-fallback',
+    model: null,
+    confidence: 0,
+    warning: null
+  };
+
+  try {
+    lexical = await desktopAPI.enrichLearningUnit({
+      term: unit.term,
+      lemma: unit.lemma,
+      unitType: unit.unitType,
+      sentence: cue.text,
+      translatedSentence: translatedText
+    });
+  } catch (error) {
+    lexical.warning = `Sözlük bilgileri hazırlanamadı: ${error.message}`;
+  }
+
+  const studyQuestion = createStudyQuestion(
+    cue.text,
+    unit.sourceStart,
+    unit.sourceEnd,
+    unit.term
+  );
+
   const result = await desktopAPI.saveLearningUnit({
     term: unit.term,
-    lemma: unit.lemma,
-    normalizedTerm: unit.lemma,
+    lemma: lexical.lemma || unit.lemma,
+    normalizedTerm: lexical.lemma || unit.lemma,
     unitType: unit.unitType,
     sourceSentence: cue.text,
     translatedSentence: translatedText,
@@ -481,6 +600,24 @@ async function saveLearningUnit(unit, cue, translatedText, analysis) {
     confidence: unit.confidence,
     analysisProvider: analysis?.provider || 'unknown',
     analysisModel: analysis?.model || null,
+    cefrLevel: unit.cefrLevel,
+    cefrConfidence: unit.cefrConfidence,
+    cefrSource: analysis?.provider === 'Gemini'
+      ? 'gemini-context-estimate'
+      : 'local-fallback',
+    dictionaryLemma: lexical.lemma || unit.lemma,
+    partOfSpeech: lexical.partOfSpeech || null,
+    wordForm: lexical.wordForm || null,
+    dictionaryDefinitions: lexical.dictionaryDefinitions || [],
+    studyHint: lexical.studyHint || '',
+    studyHintLanguage: lexical.studyHintLanguage || 'en',
+    lexicalProvider: lexical.provider || 'unknown',
+    lexicalModel: lexical.model || null,
+    lexicalConfidence: lexical.confidence,
+    studyQuestion,
+    studyAnswer: unit.term,
+    sourceStart: unit.sourceStart,
+    sourceEnd: unit.sourceEnd,
     sourceLanguage: 'en',
     targetLanguage: state.targetLanguage
   });
@@ -488,11 +625,15 @@ async function saveLearningUnit(unit, cue, translatedText, analysis) {
   elements.libraryCount.textContent = String(result.totalWords);
   setUnitSaved(unit.id);
 
+  if (lexical.warning) {
+    setStatus(lexical.warning, { error: lexical.aiConfigured });
+  }
+
   if (result.clipStatus === 'ready') {
     showToast(
       result.wasExisting
-        ? `“${unit.term}” yeniden kaydedildi; sahne klibi hazır.`
-        : `“${unit.term}” sahne klibiyle kütüphaneye eklendi.`
+        ? `“${unit.term}” yeniden kaydedildi; sözlük bilgisi ve sahne klibi hazır.`
+        : `“${unit.term}” sözlük bilgisi ve sahne klibiyle eklendi.`
     );
     return;
   }
@@ -522,9 +663,12 @@ function renderClickableSource(cue, translatedText, analysis) {
     button.className = 'source-learning-token';
     button.textContent = segment.text;
     button.dataset.unitId = unit.id;
+    const levelHint = unit.cefrLevel && unit.cefrLevel !== 'UNKNOWN'
+      ? ` · Tahmini CEFR: ${unit.cefrLevel}`
+      : '';
     button.title = unit.startToken === unit.endToken
-      ? `İngilizce kelimeyi kaydet: ${unit.term}`
-      : `İfadeyi birlikte kaydet: ${unit.term}`;
+      ? `İngilizce kelimeyi kaydet: ${unit.term}${levelHint}`
+      : `İfadeyi birlikte kaydet: ${unit.term}${levelHint}`;
 
     if (unit.startToken !== unit.endToken) {
       button.classList.add('multiword-unit');
@@ -597,29 +741,40 @@ async function toggleCurrentTranslation() {
   setStatus(`Altyazı ${getLanguageName(state.targetLanguage)} diline çevriliyor ve öğrenme birimleri analiz ediliyor...`);
 
   try {
-    const [translationResult, analysisResult] = await Promise.all([
-      cachedTranslation
-        ? Promise.resolve({ translatedText: cachedTranslation, cached: true, provider: 'memory-cache' })
-        : desktopAPI.translateSubtitle(cue.text),
-      cachedAnalysis
-        ? Promise.resolve(cachedAnalysis)
-        : desktopAPI.analyzeLearningUnits(cue.text, analysisTokensForCue(cue))
-    ]);
+    const translationPromise = cachedTranslation
+      ? Promise.resolve({ translatedText: cachedTranslation, cached: true, provider: 'memory-cache' })
+      : desktopAPI.translateSubtitle(cue.text);
+    const analysisPromise = cachedAnalysis
+      ? Promise.resolve(cachedAnalysis)
+      : desktopAPI.analyzeLearningUnits(cue.text, analysisTokensForCue(cue));
+
+    // Translation and AI analysis are intentionally not awaited together. A slow or
+    // unavailable Gemini request must never prevent the user from seeing the translation.
+    const translationResult = await translationPromise;
 
     if (requestToken !== state.translationRequestToken || translationKey(state.currentCue) !== key) {
       return;
     }
 
     state.translationCache.set(key, translationResult.translatedText);
-    state.learningAnalysisCache.set(cueKey(cue), analysisResult);
     renderTranslation(translationResult.translatedText);
+    renderPlainSource(cue);
+    setStatus('Çeviri hazır · İngilizce öğrenme birimleri analiz ediliyor...');
+
+    const analysisResult = await analysisPromise;
+
+    if (requestToken !== state.translationRequestToken || translationKey(state.currentCue) !== key) {
+      return;
+    }
+
+    state.learningAnalysisCache.set(cueKey(cue), analysisResult);
     renderClickableSource(cue, translationResult.translatedText, analysisResult);
 
     if (analysisResult.warning) {
       setStatus(analysisResult.warning, { error: analysisResult.aiConfigured });
       showToast(
         analysisResult.aiConfigured
-          ? 'AI analizi başarısız oldu; yerel ifade algılama kullanıldı.'
+          ? 'AI analizi zaman aşımına uğradı veya başarısız oldu; yerel ifade algılama kullanıldı.'
           : 'AI anahtarı yok; sınırlı yerel ifade algılama kullanılıyor.'
       );
     } else {
@@ -758,6 +913,38 @@ function libraryTypeLabel(unitType) {
   return LIBRARY_TYPE_LABELS[unitType] || 'Diğer';
 }
 
+function cefrLevelsForContexts(contexts) {
+  const order = [...CEFR_LEVELS, 'UNKNOWN'];
+  return Array.from(new Set((contexts || []).map((context) => normalizeCefrLevel(context.cefrLevel))))
+    .sort((first, second) => order.indexOf(first) - order.indexOf(second));
+}
+
+function cefrSummaryForContexts(contexts) {
+  const levels = cefrLevelsForContexts(contexts);
+  if (levels.length === 0) return { text: CEFR_LABELS.UNKNOWN, className: 'unknown' };
+  if (levels.length === 1) {
+    const level = levels[0];
+    return { text: cefrLabel(level), className: level.toLocaleLowerCase('en') };
+  }
+
+  const knownLevels = levels.filter((level) => level !== 'UNKNOWN');
+  if (knownLevels.length === 0) return { text: CEFR_LABELS.UNKNOWN, className: 'unknown' };
+  return {
+    text: knownLevels.join(' / '),
+    className: 'mixed'
+  };
+}
+
+function cefrEstimateMeta(context) {
+  const level = normalizeCefrLevel(context.cefrLevel);
+  if (level === 'UNKNOWN') return 'CEFR: Belirlenemedi';
+
+  const confidence = Number.isFinite(context.cefrConfidence)
+    ? ` · %${Math.round(context.cefrConfidence * 100)} güven`
+    : '';
+  return `CEFR: ${level} · AI tahmini${confidence}`;
+}
+
 function formatSavedDate(value) {
   if (!value) return 'Tarih bilinmiyor';
   const date = new Date(value);
@@ -795,15 +982,24 @@ function selectedLibraryLanguage() {
   return elements.libraryLanguageFilter.value || 'all';
 }
 
-function contextsForLibraryLanguage(item) {
+function selectedLibraryLevel() {
+  return elements.libraryLevelFilter.value || 'all';
+}
+
+function contextMatchesLibraryFilters(context) {
   const languageFilter = selectedLibraryLanguage();
-  const contexts = item.contexts || [];
+  const levelFilter = selectedLibraryLevel();
 
-  if (languageFilter === 'all') return contexts;
+  const languageMatches = languageFilter === 'all' ||
+    libraryLanguageKey(context.targetLanguage) === libraryLanguageKey(languageFilter);
+  const levelMatches = levelFilter === 'all' ||
+    normalizeCefrLevel(context.cefrLevel) === normalizeCefrLevel(levelFilter);
 
-  return contexts.filter((context) =>
-    libraryLanguageKey(context.targetLanguage) === libraryLanguageKey(languageFilter)
-  );
+  return languageMatches && levelMatches;
+}
+
+function contextsForLibraryFilters(item) {
+  return (item.contexts || []).filter(contextMatchesLibraryFilters);
 }
 
 function refreshLibraryLanguageFilterOptions() {
@@ -844,7 +1040,7 @@ function refreshLibraryLanguageFilterOptions() {
 
 function itemMatchesLibraryFilters(item) {
   const query = elements.librarySearchInput.value.trim().toLocaleLowerCase('en');
-  const matchingContexts = contextsForLibraryLanguage(item);
+  const matchingContexts = contextsForLibraryFilters(item);
 
   if (matchingContexts.length === 0) return false;
   if (!query) return true;
@@ -859,7 +1055,15 @@ function itemMatchesLibraryFilters(item) {
       context.translatedSentence,
       context.videoName,
       context.targetLanguage,
-      getLanguageName(context.targetLanguage)
+      getLanguageName(context.targetLanguage),
+      normalizeCefrLevel(context.cefrLevel),
+      cefrLabel(context.cefrLevel),
+      context.dictionaryLemma,
+      context.partOfSpeech,
+      context.wordForm,
+      ...(context.dictionaryDefinitions || []),
+      context.studyQuestion,
+      context.studyAnswer
     ])
   ]
     .filter(Boolean)
@@ -943,30 +1147,138 @@ function createLibraryClipPanel(context) {
   return panel;
 }
 
-function createLibraryContext(context) {
+function createLibraryContext(context, item) {
   const section = document.createElement('section');
   section.className = 'library-context';
 
-  const textBlock = document.createElement('div');
-  textBlock.className = 'library-context-text';
+  const studyColumn = document.createElement('div');
+  studyColumn.className = 'library-study-column';
+
+  const studyCard = document.createElement('div');
+  studyCard.className = 'library-study-card';
+
+  const studyEyebrow = document.createElement('span');
+  studyEyebrow.className = 'library-study-eyebrow';
+  studyEyebrow.textContent = 'Study card preview';
+
+  const instruction = document.createElement('p');
+  instruction.className = 'library-study-instruction';
+  instruction.textContent = 'Sahne klibini oynat ve boşluğu tamamla.';
+
+  const question = document.createElement('p');
+  question.className = 'library-study-question';
+  question.textContent = context.studyQuestion || createStudyQuestion(
+    context.sourceSentence,
+    null,
+    null,
+    context.studyAnswer || item.term || item.lemma
+  );
+
+  const definitions = Array.isArray(context.dictionaryDefinitions)
+    ? context.dictionaryDefinitions.slice(0, 2)
+    : [];
+  const storedEnglishHint = context.studyHintLanguage === 'en'
+    ? String(context.studyHint || '').trim()
+    : '';
+  const semanticHint = String(storedEnglishHint || definitions[0] || '').trim();
+  const hintBox = document.createElement('div');
+  hintBox.className = 'library-study-hint';
+  const hintLabel = document.createElement('span');
+  hintLabel.className = 'library-study-hint-label';
+  hintLabel.textContent = 'Anlam ipucu · İngilizce';
+  const hintText = document.createElement('p');
+  hintText.textContent = semanticHint || 'Bu eski kayıt için anlam ipucu bulunmuyor.';
+  hintBox.classList.toggle('unavailable', !semanticHint);
+  hintBox.append(hintLabel, hintText);
+
+  const revealButton = document.createElement('button');
+  revealButton.type = 'button';
+  revealButton.className = 'library-answer-button';
+  revealButton.textContent = 'Cevabı göster';
+
+  const answer = document.createElement('div');
+  answer.className = 'library-study-answer';
+  answer.hidden = true;
+
+  const answerTerm = document.createElement('strong');
+  answerTerm.className = 'library-answer-term';
+  answerTerm.textContent = context.studyAnswer || item.term || item.lemma || '';
+  answer.append(answerTerm);
 
   const source = document.createElement('p');
   source.className = 'library-source-sentence';
   source.textContent = context.sourceSentence || 'İngilizce cümle kaydedilmemiş.';
-  textBlock.append(source);
+  answer.append(source);
 
   if (context.translatedSentence) {
     const translation = document.createElement('p');
     translation.className = 'library-translated-sentence';
     translation.textContent = context.translatedSentence;
-    textBlock.append(translation);
+    answer.append(translation);
   }
+
+  const lexical = document.createElement('div');
+  lexical.className = 'library-lexical-info';
+
+  const lexicalFacts = [
+    ['Sözcük türü', partOfSpeechLabel(context.partOfSpeech || item.unitType)],
+    ['Kelimenin biçimi', context.wordForm || 'Belirlenemedi'],
+    ['Temel biçim', context.dictionaryLemma || item.lemma || item.term || 'Belirlenemedi']
+  ];
+
+  for (const [label, value] of lexicalFacts) {
+    const fact = document.createElement('div');
+    fact.className = 'library-lexical-fact';
+    const factLabel = document.createElement('span');
+    factLabel.textContent = label;
+    const factValue = document.createElement('strong');
+    factValue.textContent = value;
+    fact.append(factLabel, factValue);
+    lexical.append(fact);
+  }
+
+  answer.append(lexical);
+
+  const definitionSection = document.createElement('div');
+  definitionSection.className = 'library-definitions';
+  const definitionTitle = document.createElement('span');
+  definitionTitle.className = 'library-definition-title';
+  definitionTitle.textContent = 'İlk sözlük tanımları';
+  definitionSection.append(definitionTitle);
+
+  if (definitions.length > 0) {
+    const list = document.createElement('ol');
+    definitions.forEach((definition) => {
+      const itemElement = document.createElement('li');
+      itemElement.textContent = definition;
+      list.append(itemElement);
+    });
+    definitionSection.append(list);
+  } else {
+    const unavailable = document.createElement('p');
+    unavailable.className = 'library-definition-unavailable';
+    unavailable.textContent = 'Bu eski kayıt için sözlük tanımı yok. Kelimeyi videoda yeniden kaydedebilirsin.';
+    definitionSection.append(unavailable);
+  }
+
+  answer.append(definitionSection);
+
+  revealButton.addEventListener('click', () => {
+    const willReveal = answer.hidden;
+    answer.hidden = !willReveal;
+    revealButton.textContent = willReveal ? 'Cevabı gizle' : 'Cevabı göster';
+    revealButton.setAttribute('aria-expanded', String(willReveal));
+  });
+
+  studyCard.append(studyEyebrow, instruction, question, hintBox, revealButton, answer);
+  studyColumn.append(studyCard);
 
   const meta = document.createElement('div');
   meta.className = 'library-context-meta';
   appendMeta(meta, context.targetLanguage
     ? `Çeviri: ${getLanguageName(context.targetLanguage)}`
     : null);
+  appendMeta(meta, cefrEstimateMeta(context));
   appendMeta(meta, context.videoName || null);
 
   if (Number.isFinite(context.subtitleStartMs) && Number.isFinite(context.subtitleEndMs)) {
@@ -977,8 +1289,8 @@ function createLibraryContext(context) {
   }
 
   appendMeta(meta, context.savedAt ? `Kaydedildi: ${formatSavedDate(context.savedAt)}` : null);
-  textBlock.append(meta);
-  section.append(textBlock, createLibraryClipPanel(context));
+  studyColumn.append(meta);
+  section.append(studyColumn, createLibraryClipPanel(context));
   return section;
 }
 
@@ -1009,7 +1321,14 @@ function createLibraryCard(item, visibleContexts = item.contexts || []) {
   const typeBadge = document.createElement('span');
   typeBadge.className = `library-unit-badge ${item.unitType || 'word'}`;
   typeBadge.textContent = libraryTypeLabel(item.unitType || 'word');
-  termRow.append(term, typeBadge);
+
+  const cefrSummary = cefrSummaryForContexts(visibleContexts);
+  const cefrBadge = document.createElement('span');
+  cefrBadge.className = `library-cefr-badge ${cefrSummary.className}`;
+  cefrBadge.textContent = cefrSummary.text;
+  cefrBadge.title = 'Bu seviye, kelime veya ifadenin kaydedildiği cümledeki anlamına göre AI tarafından tahmin edilir.';
+
+  termRow.append(term, typeBadge, cefrBadge);
 
   const termMeta = document.createElement('p');
   termMeta.className = 'library-term-meta';
@@ -1082,7 +1401,7 @@ function createLibraryCard(item, visibleContexts = item.contexts || []) {
     emptyContext.textContent = 'Bu kaydın cümle bağlamı bulunmuyor.';
     contexts.append(emptyContext);
   } else {
-    sortedContexts.forEach((context) => contexts.append(createLibraryContext(context)));
+    sortedContexts.forEach((context) => contexts.append(createLibraryContext(context, item)));
   }
 
   function applyExpandedState() {
@@ -1140,7 +1459,7 @@ function createLibraryCard(item, visibleContexts = item.contexts || []) {
 }
 
 function updateLibrarySummaryText(visibleItems = state.libraryItems) {
-  const visibleContexts = visibleItems.flatMap((item) => contextsForLibraryLanguage(item));
+  const visibleContexts = visibleItems.flatMap((item) => contextsForLibraryFilters(item));
   const readyClipIds = new Set(
     visibleContexts
       .filter((context) => context.clipStatus === 'ready' && context.clipUrl)
@@ -1152,12 +1471,16 @@ function updateLibrarySummaryText(visibleItems = state.libraryItems) {
   const languageText = languageFilter === 'all'
     ? ''
     : ` · Dil: ${getLanguageName(languageFilter)}`;
+  const levelFilter = selectedLibraryLevel();
+  const levelText = levelFilter === 'all'
+    ? ''
+    : ` · Seviye: ${cefrLabel(levelFilter)}`;
   const filteredText = visibleItems.length !== state.libraryItems.length
     ? ` · ${visibleItems.length} sonuç gösteriliyor`
     : '';
 
   elements.libraryDialogSummary.textContent =
-    `${visibleItems.length} kelime/ifade · ${contextCount} cümle bağlamı · ${readyClipIds.size} oynatılabilir sahne klibi${languageText}${filteredText}`;
+    `${visibleItems.length} kelime/ifade · ${contextCount} cümle bağlamı · ${readyClipIds.size} oynatılabilir sahne klibi${languageText}${levelText}${filteredText}`;
 }
 
 function renderLibraryItems() {
@@ -1175,7 +1498,7 @@ function renderLibraryItems() {
   updateLibrarySummaryText(filteredItems);
 
   filteredItems.forEach((item) =>
-    elements.libraryList.append(createLibraryCard(item, contextsForLibraryLanguage(item)))
+    elements.libraryList.append(createLibraryCard(item, contextsForLibraryFilters(item)))
   );
 }
 
@@ -1400,6 +1723,26 @@ elements.libraryLanguageFilter.addEventListener('change', () => {
   state.expandedLibraryItemId = null;
   renderLibraryItems();
 });
+elements.libraryLevelFilter.addEventListener('change', () => {
+  state.expandedLibraryItemId = null;
+  renderLibraryItems();
+});
+
+elements.exportMobileLibraryButton.addEventListener('click', async () => {
+  elements.exportMobileLibraryButton.disabled = true;
+  try {
+    const result = await desktopAPI.exportLibraryForMobile();
+    if (!result) return;
+    showToast(`Mobil paket hazır: ${result.itemCount} öğe, ${result.clipCount} klip.`);
+    setStatus(`Mobil kütüphane paketi oluşturuldu: ${result.outputPath}`);
+  } catch (error) {
+    setStatus(`Mobil paket oluşturulamadı: ${error.message}`, { error: true });
+    showToast(error.message);
+  } finally {
+    elements.exportMobileLibraryButton.disabled = false;
+  }
+});
+
 elements.openLibraryFolderButton.addEventListener('click', async () => {
   try {
     const summary = await desktopAPI.revealLibraryFile();

@@ -84,7 +84,7 @@ test('one ready scene clip updates every library context that shares the clip id
 
   assert.equal(update.affectedContexts, 2);
   const data = JSON.parse(await fs.readFile(filePath, 'utf8'));
-  assert.equal(data.version, 3);
+  assert.equal(data.version, 7);
   assert.deepEqual(
     data.items.map((item) => item.contexts[0].clipStatus),
     ['ready', 'ready']

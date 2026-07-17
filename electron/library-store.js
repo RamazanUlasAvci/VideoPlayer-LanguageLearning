@@ -4,11 +4,62 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { normalizeLanguageCode } = require('./settings-store');
 
-const CURRENT_LIBRARY_VERSION = 3;
+const CURRENT_LIBRARY_VERSION = 7;
+const VALID_CEFR_LEVELS = new Set(['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'UNKNOWN']);
 const VALID_CLIP_STATUSES = new Set(['processing', 'ready', 'failed']);
 
 function createId() {
   return globalThis.crypto.randomUUID();
+}
+
+function normalizeCefrLevel(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return VALID_CEFR_LEVELS.has(normalized) ? normalized : 'UNKNOWN';
+}
+
+function normalizeConfidence(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : null;
+}
+
+function normalizeDictionaryDefinitions(value) {
+  const definitions = Array.isArray(value) ? value : [];
+  const unique = [];
+
+  for (const definition of definitions) {
+    const cleaned = String(definition || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned || unique.includes(cleaned)) continue;
+    unique.push(cleaned);
+    if (unique.length === 2) break;
+  }
+
+  return unique;
+}
+
+
+function normalizeStudyHint(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 240) || null;
+}
+
+function createClozeQuestion(sourceSentence, answer, sourceStart = null, sourceEnd = null) {
+  const sentence = String(sourceSentence || '');
+  const term = String(answer || '').trim();
+  if (!sentence || !term) return sentence;
+
+  if (
+    Number.isInteger(sourceStart) &&
+    Number.isInteger(sourceEnd) &&
+    sourceStart >= 0 &&
+    sourceEnd > sourceStart &&
+    sourceEnd <= sentence.length
+  ) {
+    return `${sentence.slice(0, sourceStart)}[...]${sentence.slice(sourceEnd)}`;
+  }
+
+  const index = sentence.toLocaleLowerCase('en').indexOf(term.toLocaleLowerCase('en'));
+  if (index < 0) return sentence;
+  return `${sentence.slice(0, index)}[...]${sentence.slice(index + term.length)}`;
 }
 
 class LearningLibraryStore {
@@ -38,6 +89,25 @@ class LearningLibraryStore {
 
       for (const context of item.contexts) {
         if (!context.id) context.id = createId();
+        context.cefrLevel = normalizeCefrLevel(context.cefrLevel);
+        context.cefrConfidence = normalizeConfidence(context.cefrConfidence);
+        context.cefrSource = String(context.cefrSource || '').trim() || null;
+        context.dictionaryLemma = String(context.dictionaryLemma || '').trim() || null;
+        context.partOfSpeech = String(context.partOfSpeech || '').trim() || null;
+        context.wordForm = String(context.wordForm || '').trim() || null;
+        context.dictionaryDefinitions = normalizeDictionaryDefinitions(context.dictionaryDefinitions);
+        context.studyHint = normalizeStudyHint(context.studyHint);
+        context.studyHintLanguage = String(context.studyHintLanguage || '').trim().toLowerCase() === 'en'
+          ? 'en'
+          : null;
+        context.lexicalProvider = String(context.lexicalProvider || '').trim() || null;
+        context.lexicalModel = String(context.lexicalModel || '').trim() || null;
+        context.lexicalConfidence = normalizeConfidence(context.lexicalConfidence);
+        context.studyAnswer = String(context.studyAnswer || '').trim() || item.term || item.lemma || null;
+        context.studyQuestion = String(context.studyQuestion || '').trim() || createClozeQuestion(
+          context.sourceSentence,
+          context.studyAnswer
+        );
 
         if (context.mediaClip && !context.clipId) {
           context.clipId = context.mediaClip.id || null;
@@ -168,6 +238,27 @@ class LearningLibraryStore {
       : null;
     const analysisProvider = String(input.analysisProvider || '').trim() || null;
     const analysisModel = String(input.analysisModel || '').trim() || null;
+    const cefrLevel = normalizeCefrLevel(input.cefrLevel);
+    const cefrConfidence = normalizeConfidence(input.cefrConfidence);
+    const cefrSource = String(input.cefrSource || '').trim() || null;
+    const dictionaryLemma = String(input.dictionaryLemma || input.lemma || normalizedTerm).trim() || null;
+    const partOfSpeech = String(input.partOfSpeech || '').trim() || null;
+    const wordForm = String(input.wordForm || '').trim() || null;
+    const dictionaryDefinitions = normalizeDictionaryDefinitions(input.dictionaryDefinitions);
+    const studyHint = normalizeStudyHint(input.studyHint);
+    const studyHintLanguage = String(input.studyHintLanguage || '').trim().toLowerCase() === 'en'
+      ? 'en'
+      : null;
+    const lexicalProvider = String(input.lexicalProvider || '').trim() || null;
+    const lexicalModel = String(input.lexicalModel || '').trim() || null;
+    const lexicalConfidence = normalizeConfidence(input.lexicalConfidence);
+    const studyAnswer = String(input.studyAnswer || term).trim();
+    const studyQuestion = String(input.studyQuestion || '').trim() || createClozeQuestion(
+      sourceSentence,
+      studyAnswer,
+      Number.isInteger(input.sourceStart) ? input.sourceStart : null,
+      Number.isInteger(input.sourceEnd) ? input.sourceEnd : null
+    );
     const clip = this.normalizeClip(input);
 
     return this.withWriteLock(async () => {
@@ -225,12 +316,40 @@ class LearningLibraryStore {
             videoName,
             subtitleStartMs,
             subtitleEndMs,
+            cefrLevel,
+            cefrConfidence,
+            cefrSource,
+            dictionaryLemma,
+            partOfSpeech,
+            wordForm,
+            dictionaryDefinitions,
+            studyHint,
+            studyHintLanguage,
+            lexicalProvider,
+            lexicalModel,
+            lexicalConfidence,
+            studyQuestion,
+            studyAnswer,
             savedAt: now
           };
           item.contexts.push(context);
         } else {
           context.id = context.id || createId();
           context.lastSavedAt = now;
+          context.cefrLevel = cefrLevel;
+          context.cefrConfidence = cefrConfidence;
+          context.cefrSource = cefrSource;
+          context.dictionaryLemma = dictionaryLemma;
+          context.partOfSpeech = partOfSpeech;
+          context.wordForm = wordForm;
+          context.dictionaryDefinitions = dictionaryDefinitions;
+          context.studyHint = studyHint;
+          context.studyHintLanguage = studyHintLanguage;
+          context.lexicalProvider = lexicalProvider;
+          context.lexicalModel = lexicalModel;
+          context.lexicalConfidence = lexicalConfidence;
+          context.studyQuestion = studyQuestion;
+          context.studyAnswer = studyAnswer;
         }
 
         this.applyClipToContext(context, clip);
@@ -243,6 +362,20 @@ class LearningLibraryStore {
           videoName,
           subtitleStartMs,
           subtitleEndMs,
+          cefrLevel,
+          cefrConfidence,
+          cefrSource,
+          dictionaryLemma,
+          partOfSpeech,
+          wordForm,
+          dictionaryDefinitions,
+          studyHint,
+          studyHintLanguage,
+          lexicalProvider,
+          lexicalModel,
+          lexicalConfidence,
+          studyQuestion,
+          studyAnswer,
           savedAt: now
         };
         this.applyClipToContext(context, clip);
@@ -287,7 +420,15 @@ class LearningLibraryStore {
         contextId: context.id,
         clipId: context.clipId || null,
         clipStatus: context.clipStatus || null,
-        clipPath: context.clipPath || null
+        clipPath: context.clipPath || null,
+        cefrLevel: context.cefrLevel || 'UNKNOWN',
+        cefrConfidence: context.cefrConfidence ?? null,
+        dictionaryDefinitions: context.dictionaryDefinitions || [],
+        studyHint: context.studyHint || null,
+        studyHintLanguage: context.studyHintLanguage || null,
+        partOfSpeech: context.partOfSpeech || null,
+        wordForm: context.wordForm || null,
+        studyQuestion: context.studyQuestion || null
       };
     });
   }
@@ -441,4 +582,11 @@ class LearningLibraryStore {
   }
 }
 
-module.exports = { LearningLibraryStore, CURRENT_LIBRARY_VERSION };
+module.exports = {
+  LearningLibraryStore,
+  CURRENT_LIBRARY_VERSION,
+  normalizeCefrLevel,
+  createClozeQuestion,
+  normalizeDictionaryDefinitions,
+  normalizeStudyHint
+};
